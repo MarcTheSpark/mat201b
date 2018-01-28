@@ -1,10 +1,15 @@
 /*
-  This example shows how to use Image, Array and Texture to read a .jpg file,
-display it as an OpenGL texture and print the pixel values on the command line.
-Notice that while the intput image has only 4 pixels, the rendered texture is
-smooth.  This is because interpolation is done on the GPU.
+  This displays the pixels of an image in four different ways, accessed by pressing keys 1 - 4:
+  1) (default) pixels are arranged with z=0 in the positive x and y axes, 
+  reproducing the original image.
+  2) Pixels are arranged in a unit RGB cube according to their color.
+  3) Pixels are arranged in an hsv cylinder whose base is on the x/y plane and has diameter 1
+  4) The image is stretched in a doughnut around the y axis; the the original x-value of the 
+  pixel + 1 becomes the radius, the hue becomes the angle of rotation about the y axis, and 
+  the y value remains unchanged. This way, one can see the form of the original imaged stretched
+  out according to hue.
 
-  Karl Yerkes and Matt Wright (2011/10/10)
+  Marc Evans (2018/1/28)
 */
 
 // QUESTIONS:
@@ -28,13 +33,18 @@ public:
   Mesh pointMesh;
   Buffer<Vec3f> flatVertices, rgbVertices, hsvVertices, magicVertices; 
   Buffer<Vec3f> lastVertices, targetVertices;
-  float transitionProgress = 1.0;
+  float transitionProgress = -1;
 
   MyApp() { 
 
     // Load a .jpg file
     //
-    const char *filename = "mat201b/color_spaces/double-rainbow.jpg";
+    const char *filename = "mat201b/color_spaces/octapus.jpg";
+
+    // I'm using points with a stroke size of 2 to render. I think it looks good, though 
+    // it does not obey perspective.
+    pointMesh.primitive(Graphics::POINTS);
+    pointMesh.stroke(2);
 
     if (image.load(filename)) {
       printf("Read image from %s\n", filename);
@@ -42,9 +52,6 @@ public:
       printf("Failed to read image from %s!  Quitting.\n", filename);
       exit(-1);
     }
-
-    pointMesh.primitive(Graphics::POINTS);
-    pointMesh.stroke(2);
     // Here we copy the pixels from the image to the texture
     texture.allocate(image.array());
 
@@ -107,29 +114,49 @@ public:
         float r = float(pixel.r)/255, g = float(pixel.g)/255, b = float(pixel.b)/255;
 
         Color c = Color(r, g, b);
-        HSV hsv = HSV(Color(r, g, b));
         pointMesh.color(c);
-        pointMesh.vertex(float(col)/array.width(), float(row)/array.height());
+        // note that I'm dividing in each case by the height so as to maintain the 
+        // aspect ratio of the image. Thus 1 = image height
+        float x = float(col)/array.height(), y = float(row)/array.height();
+        pointMesh.vertex(x, y);
+        HSV hsv = HSV(Color(r, g, b));
+        float& h = hsv.h, s = hsv.s, v = hsv.v;
+
         rgbVertices.append(Vec3f(r, g, b));
-        // if I delete this printout, it seg faults
-        if ((row % 100 == 0) && (col % 100 == 0)) {
-          cout << hsv.h << ", " << hsv.s << ", " << hsv.v;
-        }
+
         hsvVertices.append(Vec3f(
-          hsv.s * cos(hsv.h * 2 * M_PI), hsv.s * sin(hsv.h * 2 * M_PI), hsv.v
+          s * cos(h * 2 * M_PI)/2, s * sin(h * 2 * M_PI)/2, v
         ));
+
+        // take the picture and stretch it in a doughnut around the y axis using 
+        // the hue value this way the form of the picture is still there, since 
+        // we use the x and y values of the pixels
+        
+        magicVertices.append(Vec3f(
+          (x + 1) * cos(h * 2 * M_PI) / 2, y, (x + 1) * sin(h * 2 * M_PI) / 2
+        ));
+
       }
     }
     flatVertices = pointMesh.vertices();
   }
 
   void onAnimate(double dt) {
-    if (transitionProgress < 1) {
+    if (transitionProgress >= 0) {
+      // a negative value for transitionProgress indicates no transition is taking place
+      // so only do this if it is positive
       Buffer<Vec3f>& vertices = pointMesh.vertices();
-      for(int i = 0; i < vertices.size(); i++) {
-        vertices[i] = lerp(lastVertices[i], targetVertices[i], transitionProgress);
+      if (transitionProgress < 1) {
+        for(int i = 0; i < vertices.size(); i++) {
+          vertices[i] = lerp(lastVertices[i], targetVertices[i], transitionProgress);
+        }
+        transitionProgress += dt;
+      } else { 
+        // if we've passed 1, then we are done transitioning; 
+        // set vertices to the final value and transitionProgress to -1
+        vertices = targetVertices;
+        transitionProgress = -1;
       }
-      transitionProgress += dt;
     }
   }
 
@@ -161,7 +188,9 @@ public:
         transitionProgress = 0;
         break;
       case '4':
-        cout << "you pressed 4!";
+        lastVertices = pointMesh.vertices();
+        targetVertices = magicVertices;
+        transitionProgress = 0;
         break;
     }
   }
