@@ -110,7 +110,7 @@ public:
     for (size_t row = 0; row < array.height(); ++row) {
       for (size_t col = 0; col < array.width(); ++col) {
 
-        array.read(&pixel, col, row);
+        array.read(&pixel.r, col, row);
         float r = float(pixel.r)/255, g = float(pixel.g)/255, b = float(pixel.b)/255;
 
         Color c = Color(r, g, b);
@@ -191,6 +191,8 @@ public:
         lastVertices = pointMesh.vertices();
         targetVertices = magicVertices;
         transitionProgress = 0;
+        break;
+      default:
         break;
     }
   }
