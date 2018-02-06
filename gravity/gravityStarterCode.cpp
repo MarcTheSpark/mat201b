@@ -4,7 +4,7 @@ using namespace std;
 
 // some of these must be carefully balanced; i spent some time turning them.
 // change them however you like, but make a note of these settings.
-unsigned particleCount = 500;     // try 2, 5, 50, and 5000
+unsigned particleCount = 5000;     // try 2, 5, 50, and 5000
 double maximumAcceleration = 30;  // prevents explosion, loss of particles
 double initialRadius = 50;        // initial condition
 double initialSpeed = 50;         // initial condition
