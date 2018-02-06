@@ -34,6 +34,7 @@ public:
   Buffer<Vec3f> flatVertices, rgbVertices, hsvVertices, magicVertices; 
   Buffer<Vec3f> lastVertices, targetVertices;
   float transitionProgress = -1;
+  float t=0;
 
   MyApp() { 
 
@@ -158,6 +159,7 @@ public:
         transitionProgress = -1;
       }
     }
+    t += dt;
   }
 
   void onDraw(Graphics& g) {
@@ -165,6 +167,7 @@ public:
     g.pushMatrix();
 
     g.translate(0, 0, -5);
+    g.rotate(t*360);
     g.draw(pointMesh);
 
     g.popMatrix();
