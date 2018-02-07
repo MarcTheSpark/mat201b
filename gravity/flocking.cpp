@@ -3,7 +3,7 @@ using namespace al;
 using namespace std;
 
 // general parameters
-unsigned numBoids = 50;
+unsigned numBoids = 300;
 float boidRadius = 1.0;
 double initialRadius = 50;
 float initialSpeed = 10;
@@ -13,16 +13,16 @@ unsigned iterationsPerFrame = 1;
 
 // flocking parameters
 float neighborDist = 50;
-float desiredSeparation = 4;
+float desiredSeparation = 15;
 
 float separationWeight = 1.0;
 float cohesionWeight = 0.1;
-float alignmentWeight = 1.0;
+float alignmentWeight = 0.1;
 
 // when Boids go beyond a certain radius from the origin, they start to turn back
 // with an acceleration proportional to the distance they have gone beyond that radius
 float originPullStartRadius = 150;
-float originPullStrength = 1;
+float originPullStrength = 4;
 
 Mesh boid;  // global prototype; leave this alone
 
@@ -112,7 +112,24 @@ struct Boid {
     return limit(desiredVelocity, maxAccel);
   }
   Vec3f getAlignmentForce(vector<Boid>& theFlock) {
-    return Vec3f(0, 0, 0);
+    Vec3f sum(0, 0, 0);
+    for (auto&b : theFlock) {
+      if(&b != this && (b.position - position).mag() < neighborDist) {
+        sum += b.velocity;
+      }
+    }
+    if (sum.magSqr() > 0) {
+      // as long as there's some non-zero average velocity from the boid's neighbors
+      // we'll normalize it to the max speed (no need to divide out by a count, 
+      // since we're normalizing anyway)
+      sum.normalize(maxSpeed);
+      // get the difference between that direction at maxSpeed and our current velocity
+      sum -= velocity;
+      // and limit it to the max acceleration;
+      return limit(sum, maxAccel);
+    } else {
+      return sum;
+    }
   }
   Vec3f getOriginPullForce() {
     float distFromOrigin = position.mag();
