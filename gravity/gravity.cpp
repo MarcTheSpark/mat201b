@@ -4,7 +4,7 @@ using namespace std;
 
 // some of these must be carefully balanced; i spent some time turning them.
 // change them however you like, but make a note of these settings.
-unsigned particleCount = 500;     // try 2, 5, 50, and 5000
+unsigned particleCount = 50;     // try 2, 5, 50, and 5000
 double maximumGravitationalAcceleration = 30;  // prevents explosion, loss of particles
 double maximumSpringAcceleration = 400;  // prevents explosion, loss of particles
 double initialRadius = 50;        // initial condition
@@ -18,7 +18,7 @@ double collisionSpringConstant = -1000.0; // for collision handling
 unsigned iterationsPerFrame = 10;
 // I added this visualization for debugging. 0=no arrows drawn
 // 1=velocity, 2=net acceleration, 3=gravitational accel, 4=spring accel
-unsigned arrowToDraw = 4;
+unsigned arrowToDraw = 0;
 
 Mesh sphere;  // global prototype; leave this alone
 Mesh arrow;  // to draw arrows for debugging purposes
