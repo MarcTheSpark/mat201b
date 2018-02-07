@@ -2,33 +2,36 @@
 using namespace al;
 using namespace std;
 
-unsigned numBoids = 10;
+// general parameters
+unsigned numBoids = 50;
 float boidRadius = 1.0;
-double initialRadius = 50;        // initial condition
+double initialRadius = 50;
 float initialSpeed = 10;
 float timeStep = 0.0625;
-double scaleFactor = 0.1;         // resizes the entire scene
+double scaleFactor = 0.1;
 unsigned iterationsPerFrame = 1;
 
 // flocking parameters
 float neighborDist = 50;
+float desiredSeparation = 4;
+
+float separationWeight = 1.0;
+float cohesionWeight = 0.1;
+float alignmentWeight = 1.0;
 
 // when Boids go beyond a certain radius from the origin, they start to turn back
 // with an acceleration proportional to the distance they have gone beyond that radius
-float originPullStartRadius = 100;
+float originPullStartRadius = 150;
 float originPullStrength = 1;
-
-float separationWeight = 1.0;
-float cohesionWeight = 1.0;
-float alignmentWeight = 1.0;
 
 Mesh boid;  // global prototype; leave this alone
 
 // helper function: makes a random vector
 Vec3f r() { return Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()); }
 
-void limit(Vec3f& v, double maxMagnitude) {
-  if (v.magSqr() > maxMagnitude*maxMagnitude) v.normalize(maxMagnitude);
+Vec3f& limit(Vec3f& v, double maxMagnitude) {
+  if (v.magSqr() > maxMagnitude*maxMagnitude) return v.normalize(maxMagnitude);
+  else return v;
 }
 
 struct Boid {
@@ -69,10 +72,44 @@ struct Boid {
      p.faceToward(velocity);
   }
   Vec3f getSeparationForce(vector<Boid>& theFlock) {
-    return Vec3f(0, 0, 0);
+    Vec3f sum(0, 0, 0);   // sum up all the separation forces
+    unsigned count = 0;
+    for (auto&b : theFlock) {
+      Vec3f displacement = b.position - position;
+      float distance = displacement.mag();
+      if(&b != this && distance < desiredSeparation) {
+        // if the distance = the desired separation, the separation force is 0 (only just starting to push away)
+        // as it approaches a distance of 0, it linearly ramps up to maxSpeed
+        sum += -displacement.normalize() * (1 - distance / desiredSeparation) * maxSpeed;
+        count++;
+      }
+    }
+    if (count > 0) {
+      return sum / count;
+    } else {
+      return sum;
+    }
   }
   Vec3f getCohesionForce(vector<Boid>& theFlock) {
-    return Vec3f(0, 0, 0);
+    Vec3f sum(0, 0, 0);
+    unsigned count = 0;
+    for (auto&b : theFlock) {
+      if(&b != this && (b.position - position).mag() < neighborDist) {
+        sum += b.position;
+        count++;
+      }
+    }
+    if (count > 0) {
+      return seek(sum / count);
+    } else {
+      return sum;
+    }
+  }
+  Vec3f seek(Vec3f target) {
+    Vec3f desiredVelocity = target - position;
+    limit(desiredVelocity, maxSpeed);
+    desiredVelocity -= velocity;
+    return limit(desiredVelocity, maxAccel);
   }
   Vec3f getAlignmentForce(vector<Boid>& theFlock) {
     return Vec3f(0, 0, 0);
@@ -94,7 +131,6 @@ struct FlockingFaces : App {
   vector<Boid> boids;
 
   FlockingFaces() {
-
     light.pos(5, 5, 5);              // place the light
     nav().pos(0, 0, 30*scaleFactor);             // place the viewer
     lens().far(400*scaleFactor);                 // set the far clipping plane
