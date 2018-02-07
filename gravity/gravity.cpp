@@ -1,23 +1,31 @@
+/*
+Gravity simulation implementing spring collisions
+Marc Evans
+Mat201B Winter 2018
+2/7/2018
+marc.p.evans@gmail.com
+Licensed under the CC Attribution-ShareAlike license, assuming I'm allowed to do that.
+*/
+
 #include "allocore/io/al_App.hpp"
 using namespace al;
 using namespace std;
 
-// some of these must be carefully balanced; i spent some time turning them.
-// change them however you like, but make a note of these settings.
+
 unsigned particleCount = 50;     // try 2, 5, 50, and 5000
 double maximumGravitationalAcceleration = 30;  // prevents explosion, loss of particles
-double maximumSpringAcceleration = 400;  // prevents explosion, loss of particles
+double maximumSpringAcceleration = 400;  // much higher, since we need a strong reaction
 double initialRadius = 50;        // initial condition
 double initialSpeed = 0;         // initial condition
-double gravityFactor = 1e5;       // see Gravitational Constant
+double gravityFactor = 1e5;       // Gravitational Constant (I reduced this by an order of magnitude)
 double timeStep = 0.0625;         // keys change this value for effect
 double scaleFactor = 0.03;         // resizes the entire scene
 double sphereRadius = 3;  // increase this to make collisions more frequent
 
-double collisionSpringConstant = -1000.0; // for collision handling
-unsigned iterationsPerFrame = 10;
-// I added this visualization for debugging. 0=no arrows drawn
-// 1=velocity, 2=net acceleration, 3=gravitational accel, 4=spring accel
+double collisionSpringConstant = -1000.0; // k
+unsigned iterationsPerFrame = 10; // we run multiple iterations per frame, which turned out to be crucial
+// I added visualization of velocity and acceleration for debugging. 
+// 0=no arrow drawn, 1=velocity, 2=net acceleration, 3=gravitational accel, 4=spring accel
 unsigned arrowToDraw = 0;
 
 Mesh sphere;  // global prototype; leave this alone
@@ -70,11 +78,13 @@ struct Particle {
   }
   void rotateZToVector(Graphics& g, Vec3f x) {
     /* Rotates such that the z-axis points in the
-    same direction as x */
+    same direction as x. In future, would probably use
+    the Quat object, but I didn't understand it */
     Vec3f z = Vec3f(0, 0, 1);
     x.normalize();
     Vec3f axis = z.cross(x);
     double angle = acos(x.dot(z)/(x.mag()*z.mag()));
+    // surprisingly g.rotate expects degrees
     g.rotate(angle*360/(2*M_PI), axis);
   }
 };
