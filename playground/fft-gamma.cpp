@@ -32,39 +32,39 @@ string fullPathOrDie(string fileName, string whereToLook = ".") {
   return filePath;
 }
 
-template <size_t FFT_LENGTH>
+template <size_t fftSize>
 struct FFTer {
   unsigned blockSize;
   unsigned sampleRate;
-  float circularInputBuffer[FFT_LENGTH];
+  float circularInputBuffer[fftSize];
   unsigned circularInputBufferIndex = 0;
   bool completedOneFFTLength = false;
-  float fftBuffer[FFT_LENGTH];
-  float hanning[FFT_LENGTH];
+  float fftBuffer[fftSize];
+  float hanning[fftSize];
   unsigned currentFFTSample = 0;
   RFFT<float> fft;
-  unsigned numberOfBins = FFT_LENGTH / 2 + 1;
-  gam::Complex<float> bins[FFT_LENGTH / 2 + 1];
-  float binFreqs[FFT_LENGTH / 2 + 1];
+  unsigned numberOfBins = fftSize / 2 + 1;
+  gam::Complex<float> bins[fftSize / 2 + 1];
+  float binFreqs[fftSize / 2 + 1];
 
-  FFTer(unsigned blockSize = 128, unsigned sampleRate = 44100) {
-    assert(FFT_LENGTH % blockSize == 0);
+  FFTer(unsigned sampleRate = 44100, unsigned blockSize = 128) : fft(fftSize) {
+    assert(fftSize % blockSize == 0);
     this->blockSize = blockSize;
     this->sampleRate = sampleRate;
-    for (unsigned i = 0; i < FFT_LENGTH; i++) {
+    for (unsigned i = 0; i < fftSize; i++) {
       circularInputBuffer[i] = fftBuffer[i] = 0;
-      hanning[i] = pow(sin(float(i)/FFT_LENGTH*M_PI), 2);
+      hanning[i] = pow(sin(float(i)/fftSize*M_PI), 2);
     }
     for (unsigned i = 0; i < numberOfBins; ++i) {
       binFreqs[i] = (float)i / numberOfBins * sampleRate / 2.0;
-      bins[i] = gam::Complex(0, 0);
+      bins[i] = gam::Complex<float>(0, 0);
     }
   }
   void sendSample(float s) {
     circularInputBuffer[circularInputBufferIndex] = s;
     circularInputBufferIndex++;
-    if(circularInputBufferIndex > FFT_LENGTH) {
-      circularInputBufferIndex -= FFT_LENGTH;
+    if(circularInputBufferIndex >= fftSize) {
+      circularInputBufferIndex -= fftSize;
       completedOneFFTLength = true;
     }
   }
@@ -73,14 +73,15 @@ struct FFTer {
   }
   void calc() {
     if (completedOneFFTLength) {
-      for(unsigned i = 0; i < FFT_LENGTH; ++i) {
-        // set the fft buffer based on the last FFT_LENGTH contributions 
+      for(unsigned i = 0; i < fftSize; ++i) {
+        // set the fft buffer based on the last fftSize contributions 
         // to the circular buffer times the Hanning window
-        fftBuffer[i] = hanning[i] * circularInputBuffer[(circularInputBufferIndex + i) % FFT_LENGTH];
+        fftBuffer[i] = hanning[i] * circularInputBuffer[(circularInputBufferIndex + i) % fftSize];
       }
+
       fft.forward(fftBuffer);
 
-      for (unsigned i = 0; i < FFT_SIZE / 2 + 1; ++i) {
+      for (unsigned i = 0; i < fftSize / 2 + 1; ++i) {
         gam::Complex<float> c;
         if (i == 0)
           c(fftBuffer[0], 0);
@@ -93,35 +94,38 @@ struct FFTer {
     }
   }
   float mag(unsigned binNum) {
-    return bins[i].mag();
+    return bins[binNum].mag();
   }
   float freq(unsigned binNum) {
-    return binFreqs[i];
+    return binFreqs[binNum];
+  }
+  unsigned numBins() {
+    return numberOfBins;
   }
 };
 
 struct AlloApp : App {
   Mesh m;
   SamplePlayer<float, gam::ipl::Linear, phsInc::Loop> player;
-  RFFT<float> fft;
-  float buffer[FFT_SIZE];
-  float hanning[FFT_SIZE];
-  unsigned currentFFTSample = 0;
 
-  AlloApp() : fft(FFT_SIZE) {
+  FFTer<FFT_SIZE> marcFFT;
+
+  AlloApp() : marcFFT(SAMPLE_RATE, BLOCK_SIZE) {
     assert(FFT_SIZE % BLOCK_SIZE == 0);
     m.primitive(Graphics::LINE_STRIP);
     player.load(fullPathOrDie(SOUND_FILE_NAME, "..").c_str());
-    for (unsigned i = 0; i < FFT_SIZE; i++) {
-      buffer[i] = 0;
-      hanning[i] = pow(sin(float(i)/FFT_SIZE*M_PI), 2);
-    }
     initWindow();
     initAudio(SAMPLE_RATE, BLOCK_SIZE);
     nav().pos(0, 0, 10);
   }
 
-  virtual void onAnimate(double dt) {}
+  virtual void onAnimate(double dt) {
+    m.vertices().reset();
+    for(unsigned i = 0; i < marcFFT.numBins(); ++i) {
+      m.vertex(marcFFT.freq(i) / 10000, marcFFT.mag(i)*100);
+    }
+  }
+
   virtual void onDraw(Graphics& g, const Viewpoint& v) {
     g.color(1, 1, 1, 1);
     g.draw(m);
@@ -134,48 +138,10 @@ struct AlloApp : App {
       float s = player();
       io.out(0) = s;
       io.out(1) = s;
-      if (currentFFTSample < FFT_SIZE) {
-        buffer[currentFFTSample] = s * hanning[currentFFTSample];
-        currentFFTSample++;
-      }
+
+      marcFFT(s);
     }
-
-    if(currentFFTSample >= FFT_SIZE) {
-      // execute the FFT on the buffer
-      fft.forward(buffer);
-      // calculate how many bins to expect
-      m.vertices().reset();
-      unsigned numberOfBins = FFT_SIZE / 2 + 1;
-
-      for (int i = 0; i < numberOfBins; i++) {
-        // this is how this FFT implementation lays out the data. i won't explain
-        // this here and now. ask me about it sometime.
-        //
-        gam::Complex<float> c;
-        if (i == 0)
-          c(buffer[0], 0);
-        else if (i == numberOfBins / 2)
-          c(buffer[numberOfBins - 1], 0);
-        else
-          c(buffer[i * 2 - 1], buffer[i * 2]);
-
-        // calculate the center frequency of the current bin
-        //
-        float frequencyOfBin = (float)i / numberOfBins * 44100.0 / 2.0;
-
-        m.vertex(frequencyOfBin/10000, c.mag()*100);
-        // cout << c.mag() << endl;
-
-        // print stuff to the terminal
-        //
-        // cout << scientific << frequencyOfBin << "Hz: " << scientific << c.mag()
-        //     << endl;
-      }
-          
-      //re-zero the buffer
-      for (unsigned i = 0; i < FFT_SIZE; i++) buffer[i] = 0;
-      currentFFTSample = 0;
-    }    
+    marcFFT.calc();
   }
 };
 
