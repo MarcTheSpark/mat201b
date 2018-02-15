@@ -10,9 +10,10 @@ Licensed under the CC Attribution-ShareAlike license, assuming I'm allowed to do
 #include "Cuttlebone/Cuttlebone.hpp"
 #include "common.hpp"
 #include "allocore/io/al_App.hpp"
-#include "Gamma/Envelope.h"
-#include "Gamma/Filter.h"
 #include "Gamma/Oscillator.h"
+#include "Gamma/Noise.h"
+#include "Gamma/Filter.h"
+#include "Gamma/Analysis.h"
 using namespace al;
 using namespace std;
 using namespace gam;
@@ -21,7 +22,7 @@ using namespace gam;
 unsigned numBoids = 300;
 float boidRadius = 0.1;
 double initialRadius = 5;
-float initialSpeed = 10;
+float initialSpeed = 1.0;
 float timeStep = 0.0625;
 unsigned iterationsPerFrame = 1;
 
@@ -45,7 +46,7 @@ Mesh boid;
 
 
 // helper function: makes a random vector
-Vec3f r() { return Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()); }
+Vec3f r() { return Vec3f(al::rnd::uniformS(), al::rnd::uniformS(), al::rnd::uniformS()); }
 
 // added this to limit the length of a vector, since I didn't see one in the Vec3f class
 // (I ran into problems using normalize initially, since it would also make the vector
@@ -56,22 +57,30 @@ Vec3f& limit(Vec3f& v, double maxMagnitude) {
 }
 
 struct Boid {
-  Buzz<> buzz;
+  LFO<> lfo;
+  Biquad<> lp, bp1, bp2;
+  EnvFollow<> accelFollow, speedFollow;
+  float pan = al::rnd::uniformS();
+  float vmag = 0;
+
+  float baseFreq = 110 + int(al::rnd::uniform()*2)*55;
 
   Pose p;
   Vec3f velocity, acceleration;
   float maxSpeed = 2.0;
   float maxAccel = 10.0;
   Color c;
-  Boid() : c(HSV(rnd::uniform(), 0.7, 1)) {
+  Boid() : 
+  c(HSV(al::rnd::uniform(), 0.7, 1)), 
+  lfo(baseFreq), 
+  lp(600, 20, LOW_PASS),
+  bp1(1200, 20, BAND_PASS),
+  bp2(2000, 20, BAND_PASS) {
     p.pos(r() * initialRadius);
     velocity =
         // this will tend to spin stuff around the y axis
         Vec3f(0, 1, 0).cross(p.pos()).normalize(initialSpeed);
     p.faceToward(p.pos() + velocity);
-
-    buzz.freq(55);
-    buzz.harmonics(5);
   }
   void draw(Graphics& g) {
     g.pushMatrix();
@@ -166,8 +175,17 @@ struct Boid {
       return -p.pos()/distFromOrigin * (distFromOrigin - originPullStartRadius) * originPullStrength;
     } else { return Vec3f(0, 0, 0); }
   }
+  float prepareForBlock() {
+    lfo.freq(accelFollow(baseFreq * (1+acceleration.mag()/maxAccel*3)));
+    lp.freq(600 + velocity.x * 150);
+    bp1.freq(1200 + velocity.y * 250);
+    bp2.freq(2000 + velocity.x * 350);
+    vmag = velocity.mag();
+  }
   float getSample() {
-    return buzz();
+    float triVal = lfo.tri();
+    float total = (lp(triVal) + bp1(triVal) + bp2(triVal))/3;
+    return total * speedFollow(vmag / maxSpeed * 0.2);
   }
 };
 
@@ -238,12 +256,18 @@ struct FlockingFaces : App {
   }
 
   void onSound(AudioIOData& io) {
+    gam::Sync::master().spu(audioIO().fps());
+    for (auto& b : boids) { b.prepareForBlock(); }
     while (io()) {
-      float s = 0;
-      s += boids[0].getSample();
-      // for (auto& b : boids) { s += b.getSample() / sqrt(numBoids); }
-      io.out(0) = s;
-      io.out(1) = s;
+      float l = 0, r = 0;
+      // s += boids[0].getSample();
+      for (auto& b : boids) { 
+        float s = b.getSample() / sqrt(numBoids);  
+        l += b.pan * s;
+        r += (1-b.pan) * s;
+      }
+      io.out(0) = l;
+      io.out(1) = r;
     }
   }
 
