@@ -110,6 +110,7 @@ struct LinInterp {
 
 struct Particle {
   Vec3f position, velocity, acceleration, gravAccel, springAccel;
+  float pan = al::rnd::uniformS();
   Color c;
 
   LinInterp f1, f2, f3, gain;
@@ -353,10 +354,15 @@ struct GravitySimulator : App {
   void onSound(AudioIOData& io) {
     for (auto& p : particles) { p.prepareForBlock(); }
     while (io()) {
-      float s = 0;
-      for (auto& p : particles) { s += p.getSample() / sqrt(particleCount); }
-      io.out(0) = s;
-      io.out(1) = s;
+      float l = 0, r = 0;
+      // s += boids[0].getSample();
+      for (auto& p : particles) {
+        float s = p.getSample() / sqrt(particleCount);
+        l += p.pan * s;
+        r += (1-p.pan) * s;
+      }
+      io.out(0) = l;
+      io.out(1) = r;
     }
   }
 
