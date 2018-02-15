@@ -7,22 +7,27 @@ marc.p.evans@gmail.com
 Licensed under the CC Attribution-ShareAlike license, assuming I'm allowed to do that.
 */
 
+#include "Cuttlebone/Cuttlebone.hpp"
+#include "common.hpp"
 #include "allocore/io/al_App.hpp"
+#include "Gamma/Envelope.h"
+#include "Gamma/Filter.h"
+#include "Gamma/Oscillator.h"
 using namespace al;
 using namespace std;
+using namespace gam;
 
 // general parameters
 unsigned numBoids = 300;
-float boidRadius = 1.0;
-double initialRadius = 50;
+float boidRadius = 0.1;
+double initialRadius = 5;
 float initialSpeed = 10;
 float timeStep = 0.0625;
-double scaleFactor = 0.1;
 unsigned iterationsPerFrame = 1;
 
 // flocking parameters
-float neighborDist = 50;
-float desiredSeparation = 15;
+float neighborDist = 5;
+float desiredSeparation = 1.5;
 
 float separationWeight = 0.5;
 float cohesionWeight = 0.1;
@@ -30,10 +35,14 @@ float alignmentWeight = 0.1;
 
 // when Boids go beyond a certain radius from the origin, they start to turn back
 // with an acceleration proportional to the distance they have gone beyond that radius
-float originPullStartRadius = 100;
-float originPullStrength = 0.05;
+float originPullStartRadius = 10;
+float originPullStrength = 0.5;
+
+float followLerp = 0.07;
+float lerpRampUpTime = 1.0;
 
 Mesh boid;
+
 
 // helper function: makes a random vector
 Vec3f r() { return Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()); }
@@ -47,18 +56,22 @@ Vec3f& limit(Vec3f& v, double maxMagnitude) {
 }
 
 struct Boid {
+  Buzz<> buzz;
+
   Pose p;
   Vec3f velocity, acceleration;
-  float maxSpeed = 20.0;
-  float maxAccel = 100.0;
+  float maxSpeed = 2.0;
+  float maxAccel = 10.0;
   Color c;
-  Boid() {
+  Boid() : c(HSV(rnd::uniform(), 0.7, 1)) {
     p.pos(r() * initialRadius);
     velocity =
         // this will tend to spin stuff around the y axis
         Vec3f(0, 1, 0).cross(p.pos()).normalize(initialSpeed);
     p.faceToward(p.pos() + velocity);
-    c = HSV(rnd::uniform(), 0.7, 1);
+
+    buzz.freq(55);
+    buzz.harmonics(5);
   }
   void draw(Graphics& g) {
     g.pushMatrix();
@@ -153,24 +166,44 @@ struct Boid {
       return -p.pos()/distFromOrigin * (distFromOrigin - originPullStartRadius) * originPullStrength;
     } else { return Vec3f(0, 0, 0); }
   }
+  float getSample() {
+    return buzz();
+  }
 };
 
 struct FlockingFaces : App {
   Material material;
   Light light;
   bool simulate = true, runOneFrame = false;
+  int perspective = -1;            // -1 means free motion, otherwise it's the index of the boid to follow
+  float lerpAmount = 0;
 
   vector<Boid> boids;
+
+  State state;
+  cuttlebone::Maker<State> maker;
 
   FlockingFaces() {
     light.pos(5, 5, 5);              // place the light
     nav().pos(0, 0, 0);             // place the viewer
-    lens().far(400*scaleFactor);                 // set the far clipping plane
+    lens().far(400);                 // set the far clipping plane
+    setInitialStateInfo();
+    maker.set(state);
     background(Color(0.07));
 
     boids.resize(numBoids);
     initWindow();
     initAudio();
+  }
+
+  void setInitialStateInfo() {
+    state.numBoids = numBoids;
+  }
+
+  void setVariableStateInfo() {
+    for(unsigned i = 0; i < numBoids; i++) {
+      state.boidPoses[i] = boids[i].p;
+    }
   }
 
   void onAnimate(double dt) {
@@ -186,20 +219,31 @@ struct FlockingFaces : App {
       for (auto& b : boids)
         b.step(timeStep / iterationsPerFrame, boids);
     }
+    if(perspective >= 0) { 
+      nav().set(nav().lerp(boids[perspective].p, lerpAmount)); 
+      if (lerpAmount < followLerp) {
+        lerpAmount += dt / lerpRampUpTime * followLerp;
+      } else { lerpAmount = followLerp; }
+    }
+    setVariableStateInfo();
+    maker.set(state);
   }
 
   void onDraw(Graphics& g) {
     material();
     light();
-    g.scale(scaleFactor);
-    for (auto& b : boids)
-      b.draw(g);
+    for (int i=0; i < boids.size(); ++i) {
+      boids[i].draw(g);
+    }
   }
 
-  void onSound(AudioIO& io) {
+  void onSound(AudioIOData& io) {
     while (io()) {
-      io.out(0) = 0;
-      io.out(1) = 0;
+      float s = 0;
+      s += boids[0].getSample();
+      // for (auto& b : boids) { s += b.getSample() / sqrt(numBoids); }
+      io.out(0) = s;
+      io.out(1) = s;
     }
   }
 
@@ -226,6 +270,14 @@ struct FlockingFaces : App {
         // advance the simulation by a single frame (when the simulation is paused)
         runOneFrame = true;
         break;
+      case 'o':
+        nav().home();
+        perspective = -1;
+        break;
+      case 'p':
+        lerpAmount = 0;
+        perspective = rand() % boids.size();
+        break;
     }
   }
 };
@@ -239,10 +291,15 @@ void constructBoidMesh() {
   boid.scale(0.4, 0.4, 0.4);
   boid.translate(Vec3f(0, boidRadius*0.4, -boidRadius*0.7));
   addSphere(boid, boidRadius);
-  boid.translate(Vec3f(0, 0, 0.8));
-  addCone(boid, boidRadius/4, Vec3f(0, 0, -1.0));
-  boid.translate(Vec3f(0, 0, -0.8));
+  boid.translate(Vec3f(0, 0, boidRadius*0.8));
+  addCone(boid, boidRadius/4, Vec3f(0, 0, -boidRadius));
+  boid.translate(Vec3f(0, 0, -boidRadius*0.8));
   boid.generateNormals();
 }
 
-int main() { constructBoidMesh(); FlockingFaces().start(); }
+int main() {
+  constructBoidMesh(); 
+  FlockingFaces flockingApp;
+  flockingApp.maker.start();
+  flockingApp.start(); 
+}
