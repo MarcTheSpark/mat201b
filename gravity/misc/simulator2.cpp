@@ -12,13 +12,17 @@ Licensed under the CC Attribution-ShareAlike license, assuming I'm allowed to do
 // virtual
 
 #define SAMPLE_RATE (44100)
-#define BLOCK_SIZE (128)
+#define BLOCK_SIZE (256)
 #include "allocore/io/al_App.hpp"
 #include "Cuttlebone/Cuttlebone.hpp"
 #include "common.hpp"
 using namespace al;
 using namespace std;
 
+
+static AudioScene scene(BLOCK_SIZE);
+static StereoPanner *panner;
+static SpeakerLayout speakerLayout;
 
 unsigned particleCount = 50;     // try 2, 5, 50, and 5000
 double maximumGravitationalAcceleration = 30;  // prevents explosion, loss of particles
@@ -108,7 +112,7 @@ struct LinInterp {
   float operator()() { return getNextSample(); }
 };
 
-struct Particle {
+struct Particle : SoundSource {
   Vec3f position, velocity, acceleration, gravAccel, springAccel;
   Color c;
 
@@ -191,19 +195,23 @@ struct Particle {
   void prepareForBlock() {
     targetFrequencies();
   }
-  float getSample() {
+  void calcSample() {
     // use FM of velocity coords * magnitude of accel
     if(!gain.zero()) {
       s1.freq(f1());
       s2.freq(f2() + 1000 * s1());
       s3.freq(f3() + 1000 * s2());
-      return s3() * gain();
+      this->writeSample(s3() * gain());
     }
-    return 0;
+    this->writeSample(0);
   }
 };
 
 struct GravitySimulator : App {
+  Listener * listener;
+  // StereoPanner * panner;
+  // StereoSpeakerLayout * speakerLayout;
+
   State state;
   cuttlebone::Maker<State> maker;
   Material material;
@@ -222,13 +230,17 @@ struct GravitySimulator : App {
     lens().far(4000 * scaleFactor);   // set the far clipping plane (I changed this to respond to scaleFactor)
     particles.resize(particleCount);  // make all the particles
 
+
     setInitialStateInfo();
     setVariableStateInfo();
     maker.set(state);
     background(Color(0.07));
 
     initWindow();
-    initAudio(SAMPLE_RATE, BLOCK_SIZE);
+    // initAudio(SAMPLE_RATE, BLOCK_SIZE);
+    initAudio(SAMPLE_RATE, BLOCK_SIZE, 2, 0);
+    listener = scene.createListener(new StereoPanner(StereoSpeakerLayout()));
+    for (auto& p : particles) { scene.addSource(p); p.pos(0, 0, 0); }
   }
 
   void setInitialStateInfo() {
@@ -268,7 +280,7 @@ struct GravitySimulator : App {
     }
   }
 
-  void onAnimate(double dt) {
+  void onAnimate(double dt) override {
     if (!simulate && !runOneFrame)
       // skip the rest of this function
       return;
@@ -343,24 +355,23 @@ struct GravitySimulator : App {
     maker.set(state);
   }
 
-  void onDraw(Graphics& g) {
+  void onDraw(Graphics& g) override {
+    listener->pose(nav());
     material();
     light();
     g.scale(scaleFactor);
     for (auto p : particles) p.draw(g);
   }
 
-  void onSound(AudioIOData& io) {
+  void onSound(AudioIOData& io) override {
     for (auto& p : particles) { p.prepareForBlock(); }
     while (io()) {
-      float s = 0;
-      for (auto& p : particles) { s += p.getSample() / sqrt(particleCount); }
-      io.out(0) = s;
-      io.out(1) = s;
+      for (auto& p : particles) { p.calcSample(); }
     }
+    scene.render(io);
   }
 
-  void onKeyDown(const ViewpointWindow&, const Keyboard& k) {
+  void onKeyDown(const ViewpointWindow&, const Keyboard& k) override {
     switch (k.key()) {
       default:
       case '1':
