@@ -1,14 +1,4 @@
 /*
-  This displays the pixels of an image in four different ways, accessed by pressing keys 1 - 4:
-  1) (default) pixels are arranged with z=0 in the positive x and y axes, 
-  reproducing the original image.
-  2) Pixels are arranged in a unit RGB cube according to their color.
-  3) Pixels are arranged in an hsv cylinder whose base is on the x/y plane and has diameter 1
-  4) The image is stretched in a doughnut around the y axis; the the original x-value of the 
-  pixel + 1 becomes the radius, the hue becomes the angle of rotation about the y axis, and 
-  the y value remains unchanged. This way, one can see the form of the original imaged stretched
-  out according to hue.
-
   Marc Evans (2018/1/28)
 */
 

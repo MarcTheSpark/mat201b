@@ -201,7 +201,7 @@ struct FlockingFaces : App {
   State state;
   cuttlebone::Maker<State> maker;
 
-  FlockingFaces() {
+  FlockingFaces() : maker("255.255.255.255") {
     light.pos(5, 5, 5);              // place the light
     nav().pos(0, 0, 0);             // place the viewer
     lens().far(400);                 // set the far clipping plane

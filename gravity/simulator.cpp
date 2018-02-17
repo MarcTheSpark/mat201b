@@ -213,7 +213,7 @@ struct GravitySimulator : App {
 
   vector<Particle> particles;
 
-  GravitySimulator() {
+  GravitySimulator() : maker("255.255.255.255") {
     addSphere(sphere, 1.0);
     addCone(arrow, 0.25, Vec3f(0, 0, 1)); // to draw arrows for debugging purposes
     sphere.generateNormals();
@@ -221,7 +221,7 @@ struct GravitySimulator : App {
     light.pos(0, 0, 0);              // place the light
     nav().pos(0, 0, 300 * scaleFactor);  // place the viewer (I changed this to respond to scaleFactor)
     lens().far(4000 * scaleFactor);   // set the far clipping plane (I changed this to respond to scaleFactor)
-    particles.resize(particleCount);  // make all the particles
+    particles.resize(particleCount);  // mRFC 768 (UDP) (Postel 1980)ake all the particles
 
     setInitialStateInfo();
     setVariableStateInfo();
