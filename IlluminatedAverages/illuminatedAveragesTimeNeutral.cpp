@@ -1,8 +1,8 @@
-#define SOUND_FILE_NAME ("Beet7Mvt2KleiberStereo.wav")
+#define SOUND_FILE_NAME ("Rite4.wav")
 #define WIN_SIZE (8192)
 #define NUM_CHANNELS (2)
 #define SAMPLE_RATE (44100)
-#define OUTPUT_FILE ("Out.wav")
+#define OUTPUT_FILE ("OutRite4.wav")
 
 #include <cassert>
 #include <iostream>
@@ -42,7 +42,7 @@ struct SoundStretcherTimeNeutral : STFT {
   float compranderThreshold = 0.3;
   float compressionAmount = 0.4;   
   float maxExpansionAmount = 3.0;
-  float gain = 1.0;
+  float gain = 0.4;
 
   float magnitudeAverages[FFT_SIZE/2+1];
   unsigned numFramesAveraged = 0;
