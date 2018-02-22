@@ -50,35 +50,36 @@ struct LeafLooper {
     for(int i = 0; i < fftLength / 2; i++) {
       float radius = binRadii[i] * leafRadiiByAngle[int(phase*360) % 360];
       float angle = phase*2*M_PI;
-      newRadialStripVertices.append(Vec3f(radius*cos(angle), radius*sin(angle), 0));
-      newRadialStripColors.append(Color(1, 1, 1, fftMagnitudes[i]));
+      Vec3f newVertex(radius*cos(angle), radius*sin(angle), 0);
+      newRadialStripVertices.append(newVertex);
+      // newRadialStripColors.append(Color(1, 1, 1, fftMagnitudes[i]));
     }
-    radialStripVertices.push_back(newRadialStripVertices);
-    radialStripColors.push_back(newRadialStripColors);
-    if(radialStripVertices.size() > 1) {
-      Buffer<Vec3f>& lastRadialStripVertices = radialStripVertices[radialStripVertices.size()-2];
-      Buffer<Color>& lastRadialStripColors = radialStripColors[radialStripColors.size()-2];
-      Mesh radialStrip;
-      radialStrip.primitive(Graphics::TRIANGLE_STRIP);
-      for(int i = 0; i < fftLength / 2; i++) {
-        radialStrip.vertex(lastRadialStripVertices[i]);
-        Color lc = lastRadialStripColors[i];
-        lc.a *= 0.94;
-        radialStrip.color(lc);
-        radialStrip.vertex(newRadialStripVertices[i]);
-        radialStrip.color(newRadialStripColors[i]);
-      }
-      for(int i = 0; i < radialStrips.size(); ++i) {
-        for(auto& color : radialStrips.at(i).colors()) {
-          color.a *= 0.94;
-        }
-      }
-      radialStrips.push_back(radialStrip);
-    }
-    if(radialStrips.size() > maxStrips) {
-      radialStrips.pop_front();
-      radialStripVertices.pop_front();
-    }
+    // radialStripVertices.push_back(newRadialStripVertices);
+    // radialStripColors.push_back(newRadialStripColors);
+    // if(radialStripVertices.size() > 1) {
+    //   Buffer<Vec3f>& lastRadialStripVertices = radialStripVertices[radialStripVertices.size()-2];
+    //   Buffer<Color>& lastRadialStripColors = radialStripColors[radialStripColors.size()-2];
+    //   Mesh radialStrip;
+    //   radialStrip.primitive(Graphics::TRIANGLE_STRIP);
+    //   for(int i = 0; i < fftLength / 2; i++) {
+    //     radialStrip.vertex(lastRadialStripVertices[i]);
+    //     Color lc = lastRadialStripColors[i];
+    //     lc.a *= 0.94;
+    //     radialStrip.color(lc);
+    //     radialStrip.vertex(newRadialStripVertices[i]);
+    //     radialStrip.color(newRadialStripColors[i]);
+    //   }
+    //   for(int i = 0; i < radialStrips.size(); ++i) {
+    //     for(auto& color : radialStrips.at(i).colors()) {
+    //       color.a *= 0.94;
+    //     }
+    //   }
+    //   radialStrips.push_back(radialStrip);
+    // }
+    // if(radialStrips.size() > maxStrips) {
+    //   radialStrips.pop_front();
+    //   radialStripVertices.pop_front();
+    // }
   }
   void draw(Graphics& g) {
     g.blendOn();

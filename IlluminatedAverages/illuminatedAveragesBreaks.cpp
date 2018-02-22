@@ -15,13 +15,15 @@ template <size_t FFT_SIZE>
 struct SoundStretcher : STFT {
   float magnitudeAverages[FFT_SIZE/2+1];
   float leaky;
-  SoundStretcher(float leakCoefficient=0.99) 
-  : leaky(leakCoefficient) {
-    STFT::STFT(
-      FFT_SIZE, FFT_SIZE/4,  // Window size, hop size
-      0, HANN,COMPLEX 
-    );
+  SoundStretcher() 
+  : STFT::STFT(
+    FFT_SIZE, FFT_SIZE/4,  // Window size, hop size
+    0, HANN,COMPLEX 
+  ) {
     for(unsigned k=0; k<numBins(); ++k) { magnitudeAverages[k] = 0; }
+  }
+  void setLeak(float l) {
+    leaky = l;
   }
   float operator()(float s) {
     if(STFT::operator()(s)) {
@@ -44,15 +46,13 @@ class IlluminatedAverages : public App {
 public:
 
   Texture texture;
-  vector<SoundStretcher<WIN_SIZE>> stretchers;
+  // std::array<float, 5> stretcherLeaks = {0.9, 0.99, 0.999, 0.9999, 0.99999};
+  SoundStretcher<WIN_SIZE>  foo[6];
 
   // DEFINITELY TRY SEVERAL values of leaky simultaneously!!!!!
 
-  IlluminatedAverages() 
+  IlluminatedAverages()
   {
-    for(int i = 1; i < 6; ++i) {
-      stretchers.push_back(SoundStretcher<WIN_SIZE>(1-pow(10,-i)));
-    }
     // texture.allocate(image.array());
     initWindow(Window::Dim(600, 400), "Illuminated Averages");
     initAudio();
