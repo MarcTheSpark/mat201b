@@ -4,7 +4,8 @@
   FFT is not actually happening yet, but will be included soon.
 */
 
-#define SOUND_FILE_NAME ("EvansLeafLoopsFinal.ogg")
+#define ANALYSIS_SOUND_FILE_NAME ("EvansLeafLoopsDryDPA.ogg")
+#define PLAYBACK_SOUND_FILE_NAME ("EvansLeafLoopsFinal.ogg")
 #define SAMPLE_RATE (48000)
 #define FFT_SIZE (1024)
 
@@ -19,15 +20,22 @@ using namespace al;
 using namespace std;
 using namespace gam;
 
-float frameDeltaT = 1./60;
 
-vector<float> loadLeafRadii() {
+vector<float> loadLeafRadii(int rotation=0) {
   vector<float> leafRadii;
   ifstream input( "marc.evans/final/LeafRadii.txt" );
   for( string line; getline( input, line ); ) {
       leafRadii.push_back(stof(line));
   }
+  std::rotate(leafRadii.begin(), leafRadii.begin() + (rotation % 360 + 360) % 360, leafRadii.end());
   return leafRadii;
+};
+
+void loadDownbeats(vector<float>& downbeats) {
+  ifstream input( "marc.evans/final/downbeats.txt" );
+  for( string line; getline( input, line ); ) {
+      downbeats.push_back(stof(line));
+  }
 };
 
 string fullPathOrDie(string fileName, string whereToLook = ".") {
@@ -57,7 +65,11 @@ struct LeafLooper {
   vector<float> leafRadiiByAngle;
   vector<float> fftMagnitudes;
 
-  LeafLooper(vector<float> leafRadii) : stft(
+  // Debug
+  Mesh directionCone;
+  bool showDirectionCone;
+
+  LeafLooper(vector<float> leafRadii, bool showDirectionCone=false) : stft(
     FFT_SIZE, FFT_SIZE/4,  // Window size, hop size
     0, HANN, COMPLEX 
   ) {
@@ -67,6 +79,10 @@ struct LeafLooper {
     }
     for (auto radius : leafRadii) { leafRadiiByAngle.push_back(radius); }
     fftMagnitudes.resize(FFT_SIZE/2);
+
+    // Debug
+    this->showDirectionCone = showDirectionCone;
+    addCone(directionCone, 0.1, Vec3f(0, 0, -0.8));  // by default we treat objects as facing in the negative z direction
   }
 
   void pushNewStrip(float phase) {
@@ -75,7 +91,7 @@ struct LeafLooper {
     for(int i = 0; i < FFT_SIZE / 2; i++) {
       float radius = binRadii.at(i) * leafRadiiByAngle.at(int(phase*360) % 360);
       float angle = phase*2*M_PI;
-      newRadialStripVertices.append(Vec3f(radius*cos(angle), radius*sin(angle), 0));
+      newRadialStripVertices.append(Vec3f(-radius*cos(angle), radius*sin(angle), 0));
       newRadialStripColors.append(Color(1, 1, 1, fftMagnitudes.at(i)));
     }
     radialStripVertices.push_back(newRadialStripVertices);
@@ -107,13 +123,16 @@ struct LeafLooper {
   }
 
   void draw(Graphics& g) {
+    g.pushMatrix();
     g.blendOn();
     g.blendModeTrans();
     g.rotate(p);
-    g.translate(p.pos());
-    g.pushMatrix();
+    g.translate(-p.pos());
     for(auto& radialStrip : radialStrips) {
       g.draw(radialStrip);
+    }
+    if(showDirectionCone) {
+      g.draw(directionCone);
     }
     g.popMatrix();
   }
@@ -131,45 +150,98 @@ struct LeafLooper {
 class LeafLoops : public App {
 public:
   
-  SamplePlayer<> player;
+  // DEBUG
+  Mesh centerBox;
+
+  SamplePlayer<> anaylsisPlayer, playbackPlayer;
   bool paused = false, doOneFrame = false;
   LeafLooper ll1, ll2;
-  float t = 0;
 
-  LeafLoops() : ll1(loadLeafRadii()), ll2(loadLeafRadii()) {
-    player.load(fullPathOrDie(SOUND_FILE_NAME, "..").c_str());
+  float currentMeasurePhase = 0;
+
+  vector<float> downbeats;
+  float lastTimeTillDownbeat = 100000;
+
+  bool firstDrawDone = false;
+
+  LeafLoops() : ll1(loadLeafRadii(-17)), ll2(loadLeafRadii(-17)) {
+    anaylsisPlayer.load(fullPathOrDie(ANALYSIS_SOUND_FILE_NAME, "..").c_str());
+    playbackPlayer.load(fullPathOrDie(PLAYBACK_SOUND_FILE_NAME, "..").c_str());
     initWindow(Window::Dim(900, 600), "Leaf Loops");
     initAudio(SAMPLE_RATE);
     nav().pos(0, 0, 5);
-    nav().faceToward(0, 0, 0);
-    ll1.p.pos(-3, 0, 0);
-    ll2.p.pos(3, 0, 0);
+    nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
+    ll1.p.pos(-1, 0, 0);
+    ll1.p.faceToward(Vec3d(0, 0, 5), Vec3d(0, 1, 0));
+    ll2.p.pos(1, 0, 0);
+    ll2.p.faceToward(Vec3d(0, 0, 5), Vec3d(0, 1, 0));
+
+    loadDownbeats(downbeats);
+
+    // DEBUG
+    centerBox.vertex(-0.1, -0.1, 0);
+    centerBox.vertex(-0.1, 0.1, 0);
+    centerBox.vertex(0.1, -0.1, 0);
+    centerBox.vertex(0.1, 0.1, 0);
+    centerBox.primitive(Graphics::TRIANGLE_STRIP);
+  }
+
+  float getNextDownbeat() {
+    float t = getTime();
+    for (int i = 0; i < downbeats.size(); ++i)
+    {
+      if (downbeats[i] > t) return downbeats[i];
+    }
+    return t + 1; // not sure if this is a good way to end the piece
+  }
+
+  float getTime() {
+    return playbackPlayer.pos() / SAMPLE_RATE;
   }
 
   void onAnimate(double dt) override {
     if (!paused || doOneFrame) {
+      {
+        float timeTillDownbeat = getNextDownbeat() - getTime();
+        float phaseLeftInMeasure = 1 - currentMeasurePhase;
+        if (timeTillDownbeat < lastTimeTillDownbeat && timeTillDownbeat > dt) {
+          // if timeTillDownbeat went up, then we must have passed a barline, so we should reset phase
+          // Also, if dt >= timeTillDownbeat, then we are currently passing a barline, so we should reset phase
+          // otherwise increment phase
+          currentMeasurePhase += phaseLeftInMeasure * dt / timeTillDownbeat;
+        } else {
+          currentMeasurePhase = 0;
+        }
+        lastTimeTillDownbeat = timeTillDownbeat;
+        // cout << currentMeasurePhase << endl;
+      }
       doOneFrame = false;
-      ll1.pushNewStrip(t/2);
-      ll2.pushNewStrip(t/2);
-      t += frameDeltaT;
+      ll1.pushNewStrip(currentMeasurePhase + 0.25);
+      ll2.pushNewStrip(currentMeasurePhase + 0.25);
     }
   }
 
   void onDraw(Graphics& g) override {
     ll1.draw(g);
     ll2.draw(g);
+    firstDrawDone = true;
+    // DEBUG
+    // g.draw(centerBox);
   }
 
   void onSound(AudioIOData& io) override {
+    if(!firstDrawDone) { return; }
     gam::Sync::master().spu(audioIO().fps());
     while (io()) {
       for(int chan = 0; chan < 2; ++chan) {
-        float s = player.read(chan);
-        if(chan == 0) { ll1(s); }
-        if(chan == 1) { ll2(s); }
-        io.out(chan) = s;
+        float sampForAnalysis = anaylsisPlayer.read(chan);
+        float sampForPlayback = playbackPlayer.read(chan);
+        if(chan == 0) { ll1(sampForAnalysis); }
+        if(chan == 1) { ll2(sampForAnalysis); }
+        io.out(chan) = sampForPlayback;
       }
-      player.advance();
+      anaylsisPlayer.advance();
+      playbackPlayer.advance();
     }
   }
 
@@ -179,15 +251,6 @@ public:
         break;
       case '1':
         paused = !paused;
-        break;
-      case '2':
-        frameDeltaT *= 2;
-        break;
-      case '3':
-        frameDeltaT /= 2;
-        break;
-      case '4':
-        doOneFrame = true;
         break;
     }
   }
