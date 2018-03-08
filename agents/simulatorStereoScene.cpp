@@ -18,8 +18,11 @@ using namespace al;
 using namespace std;
 using namespace gam;
 
+#define BLOCK_SIZE (256)
+#define SAMPLE_RATE (44100)
+
 // general parameters
-unsigned numBoids = 300;
+unsigned numBoids = 1;
 float boidRadius = 0.1;
 double initialRadius = 5;
 float initialSpeed = 1.0;
@@ -44,6 +47,12 @@ float lerpRampUpTime = 1.0;
 
 Mesh boid;
 
+static AudioScene scene(BLOCK_SIZE);
+static Listener *listener;
+// static StereoPanner *panner;
+static AmbisonicsSpatializer* panner;
+
+static SpeakerLayout speakerLayout;
 
 // helper function: makes a random vector
 Vec3f r() { return Vec3f(al::rnd::uniformS(), al::rnd::uniformS(), al::rnd::uniformS()); }
@@ -56,7 +65,7 @@ Vec3f& limit(Vec3f& v, double maxMagnitude) {
   else return v;
 }
 
-struct Boid {
+struct Boid : SoundSource {
   LFO<> lfo;
   Biquad<> lp, bp1, bp2;
   EnvFollow<> accelFollow, speedFollow;
@@ -76,11 +85,12 @@ struct Boid {
   bp1(1200, 20, BAND_PASS),
   bp2(2000, 20, BAND_PASS) {
     lfo.freq(baseFreq);
-    p.pos(r() * initialRadius);
+    // p.pos(r() * initialRadius);
     velocity =
         // this will tend to spin stuff around the y axis
         Vec3f(0, 1, 0).cross(p.pos()).normalize(initialSpeed);
     p.faceToward(p.pos() + velocity);
+    this->dopplerType(DOPPLER_NONE);
   }
   void draw(Graphics& g) {
     g.pushMatrix();
@@ -91,6 +101,7 @@ struct Boid {
     g.popMatrix();
   }
   void step(float dt, vector<Boid>& theFlock) {
+
      acceleration.zero();
      // find the acceleration from the flocking forces
      acceleration = getSeparationForce(theFlock) * separationWeight + 
@@ -103,7 +114,7 @@ struct Boid {
      // euler
      velocity += acceleration * dt;
      limit(velocity, maxSpeed);
-     p.pos(p.pos() + velocity * dt);
+     // p.pos(p.pos() + velocity * dt);
 
      // face in the direction it's moving
      p.faceToward(p.pos() + velocity);
@@ -182,10 +193,13 @@ struct Boid {
     bp2.freq(2000 + velocity.x * 350);
     vmag = velocity.mag();
   }
-  float getSample() {
+  void setPosition() {
+    SoundSource::pos(p.pos().x, p.pos().y, p.pos().z);
+  }
+  void doSample() {
     float triVal = lfo.tri();
     float total = (lp(triVal) + bp1(triVal) + bp2(triVal))/3;
-    return total * speedFollow(vmag / maxSpeed * 0.2);
+    this->writeSample(total * speedFollow(vmag / maxSpeed * 0.2) * 0.9);
   }
 };
 
@@ -211,7 +225,17 @@ struct FlockingFaces : App {
 
     boids.resize(numBoids);
     initWindow();
-    initAudio();
+
+    initAudio(SAMPLE_RATE, BLOCK_SIZE, 2, 0);
+    speakerLayout = HeadsetSpeakerLayout();
+    // panner = new StereoPanner(speakerLayout);
+    panner = new AmbisonicsSpatializer(speakerLayout, 2, 1);  // dimension and order
+    listener = scene.createListener(panner);
+    listener->compile();
+    scene.addSource(boids[0]);
+    scene.usePerSampleProcessing(false);
+
+    // for(auto& boid : boids) { scene.addSource(boid); }
   }
 
   void setInitialStateInfo() {
@@ -252,23 +276,18 @@ struct FlockingFaces : App {
     light();
     for (int i=0; i < boids.size(); ++i) {
       boids[i].draw(g);
+      boids[i].setPosition();
     }
+    listener->pose(nav());
   }
 
   void onSound(AudioIOData& io) {
     gam::Sync::master().spu(audioIO().fps());
     for (auto& b : boids) { b.prepareForBlock(); }
-    while (io()) {
-      float l = 0, r = 0;
-      // s += boids[0].getSample();
-      for (auto& b : boids) { 
-        float s = b.getSample() / sqrt(numBoids);  
-        l += b.pan * s;
-        r += (1-b.pan) * s;
-      }
-      io.out(0) = l;
-      io.out(1) = r;
+    while(io()) {
+      for (auto& b : boids) { b.doSample(); }
     }
+    scene.render(io);
   }
 
   void onKeyDown(const ViewpointWindow&, const Keyboard& k) {
