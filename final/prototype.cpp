@@ -21,6 +21,14 @@ using namespace std;
 using namespace gam;
 
 
+// A way to improve contrast, rhythmic information without making quiet ones disappear. Maybe subtracting last frame from frame?
+// How do fragment shaders do fractals? How do they know their surroundings, I guess...
+// Will animate: leaf size, leaf orientation (where the top is pointing), color based on structural parameters
+// THOSE TOOLKITS
+// Did you figure out sound?
+// Maybe use the other leaf as well, such a different shape
+
+
 vector<float> loadLeafRadii(int rotation=0) {
   vector<float> leafRadii;
   ifstream input( "marc.evans/final/LeafRadii.txt" );
@@ -85,13 +93,16 @@ struct LeafLooper {
     addCone(directionCone, 0.1, Vec3f(0, 0, -0.8));  // by default we treat objects as facing in the negative z direction
   }
 
-  void pushNewStrip(float phase) {
+  void pushNewStrip(float phase, float phase2) {
     Buffer<Vec3f> newRadialStripVertices;
     Buffer<Color> newRadialStripColors;
     for(int i = 0; i < FFT_SIZE / 2; i++) {
       float radius = binRadii.at(i) * leafRadiiByAngle.at(int(phase*360) % 360);
       float angle = phase*2*M_PI;
-      newRadialStripVertices.append(Vec3f(-radius*cos(angle), radius*sin(angle), 0));
+      // loud bins get visualized with random displacement of the second angle
+      float adjustedPhase2 = phase2 + rnd::uniformS() * 0.5 * fftMagnitudes.at(i);
+      // add randomness to phase 2, and clip it
+      newRadialStripVertices.append(Vec3f(-radius*cos(angle)*sin(adjustedPhase2), radius*sin(angle), radius*cos(adjustedPhase2)));
       newRadialStripColors.append(Color(1, 1, 1, fftMagnitudes.at(i)));
     }
     radialStripVertices.push_back(newRadialStripVertices);
@@ -141,7 +152,10 @@ struct LeafLooper {
     if(stft(s)) {
       // Loop through all the bins
       for(unsigned k=0; k<stft.numBins(); ++k){
-        fftMagnitudes[k] = stft.bin(k).mag() * 500.0;
+        // higher pow reduces visual decay time
+        // multiplier gets it to roughly the right level
+        // tanh squashes it between 0 and 1
+        fftMagnitudes[k] = tanh(pow(stft.bin(k).mag(), 1.4) * 1000.0);
       }
     }
   }
@@ -216,8 +230,8 @@ public:
         // cout << currentMeasurePhase << endl;
       }
       doOneFrame = false;
-      ll1.pushNewStrip(currentMeasurePhase + 0.25);
-      ll2.pushNewStrip(currentMeasurePhase + 0.25);
+      ll1.pushNewStrip(currentMeasurePhase + 0.25, getTime()*4);
+      ll2.pushNewStrip(currentMeasurePhase + 0.25, getTime()*4);
     }
   }
 
