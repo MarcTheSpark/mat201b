@@ -1,8 +1,8 @@
-#define SOUND_FILE_NAME ("Rite4.wav")
+#define SOUND_FILE_NAME ("Smashmouth.wav")
 #define WIN_SIZE (8192)
 #define NUM_CHANNELS (2)
 #define SAMPLE_RATE (44100)
-#define OUTPUT_FILE ("OutRite4.wav")
+#define OUTPUT_FILE ("snm.wav")
 
 #include <cassert>
 #include <iostream>
@@ -40,8 +40,8 @@ struct SoundStretcherTimeNeutral : STFT {
   (So this means background noise and other insignificant spectral material gets pushed down)
   */
   float compranderThreshold = 0.3;
-  float compressionAmount = 0.4;   
-  float maxExpansionAmount = 3.0;
+  float compressionAmount = 1.0;   
+  float maxExpansionAmount = 1.0;
   float gain = 0.4;
 
   float magnitudeAverages[FFT_SIZE/2+1];

@@ -11,12 +11,15 @@ using namespace std;
 using namespace gam;
 
 
+std::vector<float> stretcherLeakCoefficients { 0.99, 0.999, 0.9999 };
+std::vector<float> stretcherGains { 1.0, 2.0, 30.0 };
+
 template <size_t FFT_SIZE>
 struct SoundStretcher : STFT {
   float magnitudeAverages[FFT_SIZE/2+1];
-  float leaky;
-  SoundStretcher(float leakCoefficient=0.99) 
-  : leaky(leakCoefficient) {
+  float leaky, gain;
+  SoundStretcher(float leakCoefficient=0.99, float gain=1.0) 
+  : leaky(leakCoefficient), gain(gain) {
     STFT::STFT(
       FFT_SIZE, FFT_SIZE/4,  // Window size, hop size
       0, HANN,COMPLEX 
@@ -36,7 +39,7 @@ struct SoundStretcher : STFT {
       }
     }
     // return a resynthesized sample
-    return STFT::operator()();
+    return STFT::operator()() * gain;
   }
 };
 
@@ -44,25 +47,28 @@ class IlluminatedAverages : public App {
 public:
 
   Texture texture;
-  vector<SoundStretcher<WIN_SIZE> *> stretchers;
+  vector<SoundStretcher<WIN_SIZE>*> stretchers;
 
   // DEFINITELY TRY SEVERAL values of leaky simultaneously!!!!!
 
   IlluminatedAverages() 
   {
-    for(int i = 1; i < 8; ++i) {
-      stretchers.push_back(new SoundStretcher<WIN_SIZE>(1-pow(10,-i)));
+    for(float leakCoefficient : stretcherLeakCoefficients) {
+      stretchers.push_back(new SoundStretcher<WIN_SIZE>(leakCoefficient));
     }
     // texture.allocate(image.array());
     initWindow(Window::Dim(600, 400), "Illuminated Averages");
     initAudio();
   }
 
-  void onDraw(Graphics& g) override {
+  ~IlluminatedAverages()
+  {
+  	for (SoundStretcher<WIN_SIZE>* stretcher : stretchers) { delete stretcher; }
+  }
 
+  void onDraw(Graphics& g) override {
     g.pushMatrix();
-      g.translate(0, 0, -5);
-      // texture.quad(g);
+    g.translate(0, 0, -5);
     g.popMatrix();
   }
 
@@ -70,8 +76,8 @@ public:
     gam::Sync::master().spu(audioIO().fps());
     while (io()) {
       float s = 0;
-      for (auto stretcherPointer : stretchers) {
-        s += (*stretcherPointer)(io.in(0));
+      for (auto stretcher : stretchers) {
+        s += (*stretcher)(io.in(0));
       }
       s /= pow(stretchers.size(), 0.5);
       io.out(0) = s;
