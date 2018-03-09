@@ -28,6 +28,8 @@ using namespace gam;
 // Did you figure out sound?
 // Maybe use the other leaf as well, such a different shape
 
+// Middle ground: extrude as a structure over space
+
 
 vector<float> loadLeafRadii(int rotation=0) {
   vector<float> leafRadii;
