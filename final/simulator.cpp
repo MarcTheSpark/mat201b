@@ -24,6 +24,20 @@ using namespace std;
 using namespace gam;
 
 
+// NOTE FOR KARL: Some things are wrong here, but I don't have time to fix it before 4, it'll probably be fixed before tomorrow.
+// For some reason the OmniStereoRenderer doesn't seem to be in the same location as the regular renderer used in the simulator
+// It looks like everythin is far away. At any rate, the pose of the simulator is copied to the renderer, so you should be able to explore the
+// shape being produced. Thanks!
+// CONTROLS: Press 1 to pause playback, 2 to skip backwards 10 seconds in the soundfile, 3 to skip forwards 10 seconds, 4 to step forward one frame when paused
+
+
+
+// Notes to self:
+
+// TODO: make the two leaf shapes go in the same direction
+// TODO: get leaves moving around us
+// TODO: inherit from allo360whatever class instead
+
 // A way to improve contrast, rhythmic information without making quiet ones disappear. Maybe subtracting last frame from frame?
 // How do fragment shaders do fractals? How do they know their surroundings, I guess...
 // Will animate: leaf size, leaf orientation (where the top is pointing), color based on structural parameters
@@ -33,23 +47,6 @@ using namespace gam;
 
 // Middle ground: extrude as a structure over space
 
-
-vector<float> loadLeafRadii(int rotation=0) {
-  vector<float> leafRadii;
-  ifstream input( "marc.evans/final/LeafRadii.txt" );
-  for( string line; getline( input, line ); ) {
-      leafRadii.push_back(stof(line));
-  }
-  std::rotate(leafRadii.begin(), leafRadii.begin() + (rotation % 360 + 360) % 360, leafRadii.end());
-  return leafRadii;
-};
-
-void loadDownbeats(vector<float>& downbeats) {
-  ifstream input( "marc.evans/final/downbeats.txt" );
-  for( string line; getline( input, line ); ) {
-      downbeats.push_back(stof(line));
-  }
-};
 
 string fullPathOrDie(string fileName, string whereToLook = ".") {
   SearchPaths searchPaths;
@@ -62,6 +59,75 @@ string fullPathOrDie(string fileName, string whereToLook = ".") {
   }
   return filePath;
 }
+
+class LeafOscillator {
+  // LeafOscillator abstract class
+   public:
+      // pure virtual function
+      virtual float getAngle(float phase) = 0;
+      virtual float getRadius(float phase) = 0;
+};
+
+
+struct SingleLeafOscillator : LeafOscillator {
+  vector<float> angles;
+  vector<float> radii;
+  float phaseAdjustment;
+  SingleLeafOscillator(string dataFileName) {
+    std::vector<float> data;
+    ifstream input(fullPathOrDie(dataFileName));
+    for( string line; getline( input, line ); ) {
+        data.push_back(stof(line));
+    }
+    for(int i = 0; i < data.size(); i += 2) {
+      Vec2f displacement(data.at(i), data.at(i+1));
+      angles.push_back(atan2(displacement.y, displacement.x));
+      radii.push_back(displacement.mag());
+    }
+  }
+
+  float getAngle(float phase) {
+    return angles.at(int((phase - floor(phase)) * angles.size()));
+  }
+
+  float getRadius(float phase) {
+    return radii.at(int((phase - floor(phase)) * radii.size()));
+  }
+};
+
+void loadDownbeats(vector<float>& downbeats) {
+  ifstream input( fullPathOrDie("LeafLoopsDownbeats.txt" ));
+  for( string line; getline( input, line ); ) {
+      downbeats.push_back(stof(line));
+  }
+};
+
+struct CombinedLeafOscillator : LeafOscillator {
+  LeafOscillator& lfo1;
+  LeafOscillator& lfo2;
+  float weighting = 0;  // weighting of 0 means all lfo1, of 1 means all lfo2
+  CombinedLeafOscillator(LeafOscillator& _lfo1, LeafOscillator& _lfo2) :
+    lfo1(_lfo1), lfo2(_lfo2) 
+  {}  
+
+  void setWeighting(float w) {
+    assert(w >= 0 && w <= 1);
+    weighting = w;
+  }
+
+  float getAngle(float phase) {
+    return (1 - weighting) * lfo1.getAngle(phase) + weighting * lfo2.getAngle(phase);
+  }
+
+  float getRadius(float phase) {
+    return (1 - weighting) * lfo1.getRadius(phase) + weighting * lfo2.getRadius(phase);
+  }
+};
+
+SingleLeafOscillator ivyOscillator("LeafDisplacements1.txt");
+SingleLeafOscillator birchOscillator("LeafDisplacements2.txt");
+CombinedLeafOscillator comboOscillator1(ivyOscillator, birchOscillator);
+CombinedLeafOscillator comboOscillator2(ivyOscillator, birchOscillator);
 
 struct LeafLooper {
   Pose p;
@@ -76,45 +142,81 @@ struct LeafLooper {
   float centerFrequency = 4000;
   float centerRadius = 1;
 
+  LeafOscillator& lfo;
   vector<float> binRadii;
-  vector<float> leafRadiiByAngle;
   vector<float> fftMagnitudes;
 
-  // Debug
+  // DEBUG
   Mesh directionCone;
-  bool showDirectionCone;
+  bool showDirectionCone = false;
 
-  LeafLooper(vector<float> leafRadii, bool showDirectionCone=false) : stft(
+  LeafLooper(LeafOscillator& _lfo) 
+  : stft(
     FFT_SIZE, FFT_SIZE/4,  // Window size, hop size
     0, HANN, COMPLEX 
-  ) {
+  ), lfo(_lfo)
+  {
     for(int i = 0; i < FFT_SIZE / 2; i++) {
         float freq = float(i) / FFT_SIZE * SAMPLE_RATE;
         binRadii.push_back((log(freq) - log(20)) / (log(centerFrequency) - log(20)) * centerRadius);  
     }
-    for (auto radius : leafRadii) { leafRadiiByAngle.push_back(radius); }
     fftMagnitudes.resize(FFT_SIZE/2);
 
-    // Debug
-    this->showDirectionCone = showDirectionCone;
+    // DEBUG
     addCone(directionCone, 0.1, Vec3f(0, 0, -0.8));  // by default we treat objects as facing in the negative z direction
   }
 
+  void draw(Graphics& g) {
+    g.pushMatrix();
+    g.blendOn();
+    g.blendModeTrans();
+    g.rotate(p);
+    g.translate(-p.pos());
+    for(auto& radialStrip : radialStrips) {
+      g.draw(radialStrip);
+    }
+    if(showDirectionCone) {
+      g.draw(directionCone);
+    }
+    g.popMatrix();
+  }
+
+  void operator()(float s) {
+    if(stft(s)) {
+      // Loop through all the bins
+      for(unsigned k=0; k<stft.numBins(); ++k){
+        // higher pow reduces visual decay time
+        // multiplier gets it to roughly the right level
+        // tanh squashes it between 0 and 1
+        fftMagnitudes[k] = tanh(pow(stft.bin(k).mag(), 1.3) * 1000.0);
+      }
+    }
+  }
+
   void pushNewStrip(float phase, float phase2) {
+    // ADD A NEW STRIP OF VERTICES AND COLORS
     Buffer<Vec3f> newRadialStripVertices;
     Buffer<Color> newRadialStripColors;
     for(int i = 0; i < FFT_SIZE / 2; i++) {
-      float radius = binRadii.at(i) * leafRadiiByAngle.at(int(phase*360) % 360);
-      float angle = phase*2*M_PI;
+      float radius = binRadii.at(i) * lfo.getRadius(phase);
+      float angle = lfo.getAngle(phase);
       // loud bins get visualized with random displacement of the second angle
-      float adjustedPhase2 = phase2 + rnd::uniformS() * 0.5 * fftMagnitudes.at(i);
+      float adjustedPhase2 = phase2 + rnd::uniformS() * 0.5 * fftMagnitudes.at(i); // 0.5*M_PI; 
       // add randomness to phase 2, and clip it
       newRadialStripVertices.append(Vec3f(-radius*cos(angle)*sin(adjustedPhase2), radius*sin(angle), radius*cos(adjustedPhase2)));
       newRadialStripColors.append(Color(1, 1, 1, fftMagnitudes.at(i)));
     }
     radialStripVertices.push_back(newRadialStripVertices);
     radialStripColors.push_back(newRadialStripColors);
+    pushNewStripMesh();
+  }
+
+  private:
+  void pushNewStripMesh() {
+    // Construct a new strip mesh out of the last two sets of vertices and colors we added
     if(radialStripVertices.size() > 1) {
+      Buffer<Vec3f>& newRadialStripVertices = radialStripVertices.at(radialStripVertices.size()-1);
+      Buffer<Color>& newRadialStripColors = radialStripColors.at(radialStripColors.size()-1);
       Buffer<Vec3f>& lastRadialStripVertices = radialStripVertices.at(radialStripVertices.size()-2);
       Buffer<Color>& lastRadialStripColors = radialStripColors.at(radialStripColors.size()-2);
       Mesh radialStrip;
@@ -147,40 +249,10 @@ struct LeafLooper {
       radialStripVertices.pop_front();
     }
   }
-
-  void draw(Graphics& g) {
-    g.pushMatrix();
-    g.blendOn();
-    g.blendModeTrans();
-    g.rotate(p);
-    g.translate(-p.pos());
-    for(auto& radialStrip : radialStrips) {
-      g.draw(radialStrip);
-    }
-    if(showDirectionCone) {
-      g.draw(directionCone);
-    }
-    g.popMatrix();
-  }
-
-  void operator()(float s) {
-    if(stft(s)) {
-      // Loop through all the bins
-      for(unsigned k=0; k<stft.numBins(); ++k){
-        // higher pow reduces visual decay time
-        // multiplier gets it to roughly the right level
-        // tanh squashes it between 0 and 1
-        fftMagnitudes[k] = tanh(pow(stft.bin(k).mag(), 1.3) * 1000.0);
-      }
-    }
-  }
 };
 
 class LeafLoops : public App {
 public:
-  
-  // DEBUG
-  Mesh centerBox;
 
   State state;
   cuttlebone::Maker<State> maker;
@@ -196,26 +268,51 @@ public:
 
   bool firstDrawDone = false;
 
-  LeafLoops() : ll1(loadLeafRadii(-17)), ll2(loadLeafRadii(-17)) {
-    anaylsisPlayer.load(fullPathOrDie(ANALYSIS_SOUND_FILE_NAME, "..").c_str());
-    playbackPlayer.load(fullPathOrDie(PLAYBACK_SOUND_FILE_NAME, "..").c_str());
+  LeafLoops() : ll1(comboOscillator1), ll2(comboOscillator2) {
+    anaylsisPlayer.load(fullPathOrDie(ANALYSIS_SOUND_FILE_NAME).c_str());
+    anaylsisPlayer.pos(FFT_SIZE); // give the analysisPlayer a headstart of FFT_SIZE, to compensate for the lag in analysis
+    playbackPlayer.load(fullPathOrDie(PLAYBACK_SOUND_FILE_NAME).c_str());
     initWindow(Window::Dim(900, 600), "Leaf Loops");
     initAudio(SAMPLE_RATE);
-    nav().pos(0, 0, 5);
-    nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
-    ll1.p.pos(-1, 0, 0);
-    ll1.p.faceToward(Vec3d(0, 0, 5), Vec3d(0, 1, 0));
-    ll2.p.pos(1, 0, 0);
-    ll2.p.faceToward(Vec3d(0, 0, 5), Vec3d(0, 1, 0));
+    nav().pos(0, 0, 0);
+    nav().faceToward(Vec3d(0, 0, -1), Vec3d(0, 1, 0));
+    ll1.p.pos(0, 0, -3);
+    ll1.p.faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
+    ll2.p.pos(0, 0, 3);
+    ll2.p.faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
 
     loadDownbeats(downbeats);
 
-    // DEBUG
-    centerBox.vertex(-0.1, -0.1, 0);
-    centerBox.vertex(-0.1, 0.1, 0);
-    centerBox.vertex(0.1, -0.1, 0);
-    centerBox.vertex(0.1, 0.1, 0);
-    centerBox.primitive(Graphics::TRIANGLE_STRIP);
+    ll1.showDirectionCone = false;
+    paused = false;
+  }
+
+  void onAnimate(double dt) override {
+    if (!paused || doOneFrame) {
+      doOneFrame = false;
+      float measurePhase = getMeasurePhase(dt);
+
+      ll1.pushNewStrip(currentMeasurePhase, getTime()*4);
+      ll2.pushNewStrip(currentMeasurePhase, getTime()*4);
+
+      sendDataToCuttlebone();
+    }
+  }
+
+  float getMeasurePhase(double dt) {
+    float timeTillDownbeat = getNextDownbeat() - getTime();
+    float phaseLeftInMeasure = 1 - currentMeasurePhase;
+    if (timeTillDownbeat < lastTimeTillDownbeat && timeTillDownbeat > dt) {
+      // if timeTillDownbeat went up, then we must have passed a barline, so we should reset phase
+      // Also, if dt >= timeTillDownbeat, then we are currently passing a barline, so we should reset phase
+      // otherwise increment phase
+      currentMeasurePhase += phaseLeftInMeasure * dt / timeTillDownbeat;
+    } else {
+      currentMeasurePhase = 0;
+    }
+    lastTimeTillDownbeat = timeTillDownbeat;
+    // returns currentMeasurePhase, but obviously currentMeasurePhase could also just be accessed directly
+    return currentMeasurePhase;
   }
 
   float getNextDownbeat() {
@@ -231,44 +328,28 @@ public:
     return playbackPlayer.pos() / SAMPLE_RATE;
   }
 
-  void onAnimate(double dt) override {
-    if (!paused || doOneFrame) {
-      {
-        float timeTillDownbeat = getNextDownbeat() - getTime();
-        float phaseLeftInMeasure = 1 - currentMeasurePhase;
-        if (timeTillDownbeat < lastTimeTillDownbeat && timeTillDownbeat > dt) {
-          // if timeTillDownbeat went up, then we must have passed a barline, so we should reset phase
-          // Also, if dt >= timeTillDownbeat, then we are currently passing a barline, so we should reset phase
-          // otherwise increment phase
-          currentMeasurePhase += phaseLeftInMeasure * dt / timeTillDownbeat;
-        } else {
-          currentMeasurePhase = 0;
-        }
-        lastTimeTillDownbeat = timeTillDownbeat;
-        // cout << currentMeasurePhase << endl;
-      }
-      doOneFrame = false;
-      ll1.pushNewStrip(currentMeasurePhase + 0.25, getTime()*4);
-      ll2.pushNewStrip(currentMeasurePhase + 0.25, getTime()*4);
-      ll1.llData.p = ll1.p;
-      ll2.llData.p = ll2.p;
-      state.llDatas[0] = ll1.llData;
-      state.llDatas[1] = ll2.llData;
-      state.framenum++;
-      maker.set(state);
-    }
+  void sendDataToCuttlebone() {
+    // transfer the poses to the cuttlebone-friendly data structure of each leaf looper
+    ll1.llData.p = ll1.p;
+    ll2.llData.p = ll2.p;
+    // set those to cuttlebone-friendly data structures in the cuttlebone maker
+    state.llDatas[0] = ll1.llData;
+    state.llDatas[1] = ll2.llData;
+    // increment framenum
+    state.framenum++;
+    state.navPose = nav();
+    // send it along!
+    maker.set(state);
   }
 
   void onDraw(Graphics& g) override {
     ll1.draw(g);
     ll2.draw(g);
     firstDrawDone = true;
-    // DEBUG
-    // g.draw(centerBox);
   }
 
   void onSound(AudioIOData& io) override {
-    if(!firstDrawDone) { return; }
+    if(!firstDrawDone || (paused && !doOneFrame)) { return; }
     gam::Sync::master().spu(audioIO().fps());
     while (io()) {
       for(int chan = 0; chan < 2; ++chan) {
@@ -289,6 +370,23 @@ public:
         break;
       case '1':
         paused = !paused;
+        break;
+      case '2':
+        anaylsisPlayer.pos(std::max(anaylsisPlayer.pos() - 10 * SAMPLE_RATE, 0.0));
+        playbackPlayer.pos(std::max(playbackPlayer.pos() - 10 * SAMPLE_RATE, 0.0));
+        break;
+      case '3':
+        anaylsisPlayer.pos(std::min(anaylsisPlayer.pos() + 10 * SAMPLE_RATE, double(anaylsisPlayer.frames())));
+        playbackPlayer.pos(std::min(playbackPlayer.pos() + 10 * SAMPLE_RATE, double(playbackPlayer.frames())));
+        break;
+      case '4':
+        doOneFrame = true;
+        break;
+      case '5':
+        comboOscillator2.setWeighting(std::max(comboOscillator2.weighting - 0.05, 0.0));
+        break;
+      case '6':
+        comboOscillator2.setWeighting(std::min(comboOscillator2.weighting + 0.05, 1.0));
         break;
     }
   }

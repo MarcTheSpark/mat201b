@@ -11,12 +11,15 @@
 #include "allocore/io/al_App.hpp"
 #include "Cuttlebone/Cuttlebone.hpp"
 #include "common.hpp"
+#include "alloutil/al_OmniStereoGraphicsRenderer.hpp"
+
 using namespace al;
 using namespace std;
 
 #define FFT_SIZE (1024)
 #define NUM_LEAF_LOOPERS (2)
 #define REDUNDANCY (5)
+
 #define VISUAL_DECAY (0.8)
 
 
@@ -53,7 +56,7 @@ struct LeafLooper {
 
 };
 
-class LeafLoops : public App {
+class LeafLoops : public OmniStereoGraphicsRenderer {
 public:
   LeafLooper lls[NUM_LEAF_LOOPERS];
   State state;
@@ -62,16 +65,17 @@ public:
 
   LeafLoops() {
     initWindow(Window::Dim(900, 600), "Leaf Loops");
-    nav().pos(0, 0, 5);
-    nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
-    lls[0].p.pos(-1, 0, 0);
-    lls[0].p.faceToward(Vec3d(0, 0, 5), Vec3d(0, 1, 0));
-    lls[1].p.pos(1, 0, 0);
-    lls[1].p.faceToward(Vec3d(0, 0, 5), Vec3d(0, 1, 0));
+    pose.pos(0, 0, 0);
+    pose.faceToward(Vec3d(0, 0, -1), Vec3d(0, 1, 0));
+    lls[0].p.pos(-1, 0, -7);
+    lls[0].p.faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
+    lls[1].p.pos(1, 0, -7);
+    lls[1].p.faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
   }
 
   void onAnimate(double dt) override {
     taker.get(state);
+    pose = state.navPose;
     for(; framenum < state.framenum; framenum++) {
       for(int whichlooper=0; whichlooper < NUM_LEAF_LOOPERS; ++whichlooper) {
         LeafLooperData& llData = state.llDatas[whichlooper];
@@ -94,13 +98,6 @@ public:
   void onDraw(Graphics& g) override {
     for(LeafLooper& ll : lls) {
       ll.draw(g);
-    }
-  }
-
-  void onKeyDown (const Keyboard &k) override {
-    switch(k.key()) {
-      default:
-        break;
     }
   }
 };
