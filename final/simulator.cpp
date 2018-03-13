@@ -131,6 +131,10 @@ struct LeafLooper {
   deque<Buffer<Vec3f>> radialStripVertices;
   deque<Buffer<Color>> radialStripColors;
   deque<Mesh> radialStrips;
+
+  Mesh history;
+  bool trackHistory = false;
+
   int maxStrips = 60;
 
   LeafLooperData llData;  // The cuttlebone struct for this lil guy
@@ -142,15 +146,17 @@ struct LeafLooper {
   vector<float> binRadii;
   vector<float> fftMagnitudes;
 
+  Color llColor;
+
   // DEBUG
   Mesh directionCone;
   bool showDirectionCone = false;
 
-  LeafLooper(LeafOscillator& _lfo) 
+  LeafLooper(LeafOscillator& _lfo, Color _llColor) 
   : stft(
     FFT_SIZE, FFT_SIZE/4,  // Window size, hop size
     0, HANN, COMPLEX 
-  ), lfo(_lfo)
+  ), lfo(_lfo), llColor(_llColor)
   {
     for(int i = 0; i < FFT_SIZE / 2; i++) {
         float freq = float(i) / FFT_SIZE * SAMPLE_RATE;
@@ -158,15 +164,19 @@ struct LeafLooper {
     }
     fftMagnitudes.resize(FFT_SIZE/2);
 
+    history.primitive(Graphics::TRIANGLE_STRIP);
+
     // DEBUG
     addCone(directionCone, 0.1, Vec3f(0, 0, -0.8));  // by default we treat objects as facing in the negative z direction
     directionCone.generateNormals();
   }
 
   void draw(Graphics& g) {
-    g.pushMatrix();
+    g.color(llColor);
     g.blendOn();
     g.blendModeTrans();
+    g.pushMatrix();
+
     g.translate(p.pos());
     g.rotate(p);
     for(auto& radialStrip : radialStrips) {
@@ -176,6 +186,9 @@ struct LeafLooper {
       g.draw(directionCone);
     }
     g.popMatrix();
+    if(trackHistory) {
+      g.draw(history);
+    }
   }
 
   void operator()(float s) {
@@ -191,6 +204,7 @@ struct LeafLooper {
   }
 
   void pushNewStrip(float phase, float phase2) {
+    float maxMag = 0;
     // ADD A NEW STRIP OF VERTICES AND COLORS
     Buffer<Vec3f> newRadialStripVertices;
     Buffer<Color> newRadialStripColors;
@@ -202,10 +216,18 @@ struct LeafLooper {
       // add randomness to phase 2, and clip it
       newRadialStripVertices.append(Vec3f(-radius*cos(angle)*sin(adjustedPhase2), radius*sin(angle), radius*cos(adjustedPhase2)));
       newRadialStripColors.append(Color(1, 1, 1, fftMagnitudes.at(i)));
+
+      if(fftMagnitudes.at(i) > maxMag) { maxMag = fftMagnitudes.at(i); }
     }
     radialStripVertices.push_back(newRadialStripVertices);
     radialStripColors.push_back(newRadialStripColors);
     pushNewStripMesh();
+    if(trackHistory) {
+      history.vertex(p.pos() + Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()) * maxMag / 10 );
+      history.color(Color(llColor.r, llColor.g, llColor.b, maxMag));
+      history.vertex(p.pos() + Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()) * maxMag / 10 );
+      history.color(Color(llColor.r, llColor.g, llColor.b, maxMag));
+    }
   }
 
   private:
@@ -274,7 +296,7 @@ public:
   float ll2HorizontalMotionFreq = 0.08, ll2VerticalMotionFreq = 0.05;
   float ll2HMotionRadiusMul = 8.0, ll2VMotionRadiusMul = 4.0;
 
-  LeafLoops() : ll1(ll1ComboOscillator), ll2(ll2ComboOscillator) {
+  LeafLoops() : ll1(ll1ComboOscillator, Color(0.8, 0.8, 0.0)), ll2(ll2ComboOscillator, Color(0.0, 0.8, 0.8)) {
     anaylsisPlayer.load(fullPathOrDie(ANALYSIS_SOUND_FILE_NAME).c_str());
     anaylsisPlayer.pos(FFT_SIZE); // give the analysisPlayer a headstart of FFT_SIZE, to compensate for the lag in analysis
     playbackPlayer.load(fullPathOrDie(PLAYBACK_SOUND_FILE_NAME).c_str());
@@ -456,6 +478,10 @@ public:
       case '=':
         nav().pos(0, 0, 0);
         nav().faceToward(Vec3d(0, 0, -1), Vec3d(0, 1, 0));
+        break;
+      case '0':
+        ll1.trackHistory = !ll1.trackHistory;
+        ll2.trackHistory = !ll2.trackHistory;
         break;
     }
   }
