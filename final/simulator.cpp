@@ -9,6 +9,7 @@
 #define FFT_SIZE (1024)
 #define REDUNDANCY (5)
 #define VISUAL_DECAY (0.8)
+#define MIN_DIST (3)
 
 #include <cassert>
 #include <iostream>
@@ -29,7 +30,8 @@ using namespace gam;
 
 // Notes to self:
 
-// TODO: get leaves moving around us
+// TODO: figure out why hybrid leaf jumps
+// TODO: make leaf motion code cleaner
 // TODO: try extruding something.
 
 // Will animate: leaf size, leaf orientation (where the top is pointing), color based on structural parameters
@@ -50,6 +52,13 @@ string fullPathOrDie(string fileName, string whereToLook = ".") {
   return filePath;
 }
 
+void loadDownbeats(vector<float>& downbeats) {
+  ifstream input( fullPathOrDie("LeafLoopsDownbeats.txt" ));
+  for( string line; getline( input, line ); ) {
+      downbeats.push_back(stof(line));
+  }
+};
+
 class LeafOscillator {
   // LeafOscillator abstract class
    public:
@@ -57,7 +66,6 @@ class LeafOscillator {
       virtual float getAngle(float phase) = 0;
       virtual float getRadius(float phase) = 0;
 };
-
 
 struct SingleLeafOscillator : LeafOscillator {
   vector<float> angles;
@@ -85,12 +93,6 @@ struct SingleLeafOscillator : LeafOscillator {
   }
 };
 
-void loadDownbeats(vector<float>& downbeats) {
-  ifstream input( fullPathOrDie("LeafLoopsDownbeats.txt" ));
-  for( string line; getline( input, line ); ) {
-      downbeats.push_back(stof(line));
-  }
-};
 
 struct CombinedLeafOscillator : LeafOscillator {
   LeafOscillator& lfo1;
@@ -263,14 +265,23 @@ public:
 
   bool firstDrawDone = false;
 
+  // Motion
+  float ll1HorizontalMotionPhase = 0, ll1VerticalMotionPhase = 0;
+  float ll1HorizontalMotionFreq = 0.08, ll1VerticalMotionFreq = 0.05;
+  float ll1HMotionRadiusMul = 8.0, ll1VMotionRadiusMul = 4.0;
+
+  float ll2HorizontalMotionPhase = 0, ll2VerticalMotionPhase = 0;
+  float ll2HorizontalMotionFreq = 0.08, ll2VerticalMotionFreq = 0.05;
+  float ll2HMotionRadiusMul = 8.0, ll2VMotionRadiusMul = 4.0;
+
   LeafLoops() : ll1(ll1ComboOscillator), ll2(ll2ComboOscillator) {
     anaylsisPlayer.load(fullPathOrDie(ANALYSIS_SOUND_FILE_NAME).c_str());
     anaylsisPlayer.pos(FFT_SIZE); // give the analysisPlayer a headstart of FFT_SIZE, to compensate for the lag in analysis
     playbackPlayer.load(fullPathOrDie(PLAYBACK_SOUND_FILE_NAME).c_str());
     initWindow(Window::Dim(900, 600), "Leaf Loops");
     initAudio(SAMPLE_RATE);
-    nav().pos(0, 0, 0);
-    nav().faceToward(Vec3d(0, 0, -1), Vec3d(0, 1, 0));
+    nav().pos(0, 20, 0);
+    nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 0, -1));
     ll1.p.pos(0, 0, -3);
     ll1.p.faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
     ll2.p.pos(0, 0, 3);
@@ -278,7 +289,19 @@ public:
 
     loadDownbeats(downbeats);
 
+    initializeMotionVariables();
+
     paused = false;
+  }
+
+  void initializeMotionVariables() {
+    ll1VerticalMotionComboOscillator.weighting = 0;
+    ll1HorizontalMotionComboOscillator.weighting = 0;
+    ll1HorizontalMotionPhase = 0, ll1VerticalMotionPhase = 0;
+
+    ll2VerticalMotionComboOscillator.weighting = 0;
+    ll2HorizontalMotionComboOscillator.weighting = 0;
+    ll2HorizontalMotionPhase = 0.5, ll2VerticalMotionPhase = 0.0;
   }
 
   void onAnimate(double dt) override {
@@ -289,7 +312,51 @@ public:
       ll1.pushNewStrip(currentMeasurePhase, getTime()*4);
       ll2.pushNewStrip(currentMeasurePhase, getTime()*4);
 
+      setLLPositions(dt);
       sendDataToCuttlebone();
+    }
+  }
+
+  void setLLPositions(double dt) {
+    { // ll1
+      float ll1HAngle = ll1HorizontalMotionComboOscillator.getAngle(ll1HorizontalMotionPhase);
+      float ll1HRadius = ll1HorizontalMotionComboOscillator.getRadius(ll1HorizontalMotionPhase);
+      float ll1VAngle = ll1VerticalMotionComboOscillator.getAngle(ll1VerticalMotionPhase);
+      float ll1VRadius = ll1VerticalMotionComboOscillator.getRadius(ll1VerticalMotionPhase);
+      Pose newGoal;
+      float goalX = cos(ll1HAngle) * ll1HRadius * ll1HMotionRadiusMul;
+      float goalY = sin(ll1VAngle) * ll1VRadius * ll1VMotionRadiusMul;
+      float goalZ = -sin(ll1HAngle) * cos(ll1VAngle) * ll1VRadius * ll1HRadius * ll1HMotionRadiusMul;
+      float horizontalDist = hypot(goalX, goalZ);
+      if(horizontalDist < MIN_DIST) { // ensure it doesn't get too close
+          goalX *= MIN_DIST / horizontalDist;
+          goalZ *= MIN_DIST / horizontalDist;
+      }
+      newGoal.pos(Vec3d(goalX, goalY, goalZ));
+      newGoal.faceToward(Vec3d(0, 0, 0));
+      ll1.p = ll1.p.lerp(newGoal, 0.01);
+      ll1HorizontalMotionPhase += dt * ll1HorizontalMotionFreq;
+      ll1VerticalMotionPhase += dt * ll1VerticalMotionFreq;
+    }
+    { // ll2  ::: THIS IS STUPID TO COPY!!!
+      float ll2HAngle = ll2HorizontalMotionComboOscillator.getAngle(ll2HorizontalMotionPhase);
+      float ll2HRadius = ll2HorizontalMotionComboOscillator.getRadius(ll2HorizontalMotionPhase);
+      float ll2VAngle = ll2VerticalMotionComboOscillator.getAngle(ll2VerticalMotionPhase);
+      float ll2VRadius = ll2VerticalMotionComboOscillator.getRadius(ll2VerticalMotionPhase);
+      Pose newGoal;
+      float goalX = cos(ll2HAngle) * ll2HRadius * ll2HMotionRadiusMul;
+      float goalY = sin(ll2VAngle) * ll2VRadius * ll2VMotionRadiusMul;
+      float goalZ = -sin(ll2HAngle) * cos(ll2VAngle) * ll2VRadius * ll2HRadius * ll2HMotionRadiusMul;
+      float horizontalDist = hypot(goalX, goalZ);
+      if(horizontalDist < MIN_DIST) { // ensure it doesn't get too close
+          goalX *= MIN_DIST / horizontalDist;
+          goalZ *= MIN_DIST / horizontalDist;
+      }
+      newGoal.pos(Vec3d(goalX, goalY, goalZ));
+      newGoal.faceToward(Vec3d(0, 0, 0));
+      ll2.p = ll2.p.lerp(newGoal, 0.01);
+      ll2HorizontalMotionPhase += dt * ll2HorizontalMotionFreq;
+      ll2VerticalMotionPhase += dt * ll2VerticalMotionFreq;
     }
   }
 
@@ -381,6 +448,14 @@ public:
         break;
       case '6':
         ll1ComboOscillator.setWeighting(std::min(ll1ComboOscillator.weighting + 0.05, 1.0));
+        break;
+      case '-':
+        nav().pos(0, 20, 0);
+        nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 0, -1));
+        break;
+      case '=':
+        nav().pos(0, 0, 0);
+        nav().faceToward(Vec3d(0, 0, -1), Vec3d(0, 1, 0));
         break;
     }
   }
