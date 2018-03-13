@@ -475,7 +475,7 @@ public:
         nav().pos(0, 20, 0);
         nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 0, -1));
         break;
-      case '=':
+      case '=':ll1.trackHistory = !ll1.trackHistory;
         nav().pos(0, 0, 0);
         nav().faceToward(Vec3d(0, 0, -1), Vec3d(0, 1, 0));
         break;
