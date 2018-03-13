@@ -24,27 +24,17 @@ using namespace std;
 using namespace gam;
 
 
-// NOTE FOR KARL: Some things are wrong here, but I don't have time to fix it before 4, it'll probably be fixed before tomorrow.
-// For some reason the OmniStereoRenderer doesn't seem to be in the same location as the regular renderer used in the simulator
-// It looks like everythin is far away. At any rate, the pose of the simulator is copied to the renderer, so you should be able to explore the
-// shape being produced. Thanks!
 // CONTROLS: Press 1 to pause playback, 2 to skip backwards 10 seconds in the soundfile, 3 to skip forwards 10 seconds, 4 to step forward one frame when paused
-
 
 
 // Notes to self:
 
-// TODO: make the two leaf shapes go in the same direction
 // TODO: get leaves moving around us
-// TODO: inherit from allo360whatever class instead
+// TODO: try extruding something.
 
-// A way to improve contrast, rhythmic information without making quiet ones disappear. Maybe subtracting last frame from frame?
-// How do fragment shaders do fractals? How do they know their surroundings, I guess...
 // Will animate: leaf size, leaf orientation (where the top is pointing), color based on structural parameters
 // THOSE TOOLKITS
 // Did you figure out sound?
-// Maybe use the other leaf as well, such a different shape
-
 // Middle ground: extrude as a structure over space
 
 
@@ -126,8 +116,12 @@ struct CombinedLeafOscillator : LeafOscillator {
 
 SingleLeafOscillator ivyOscillator("LeafDisplacements1.txt");
 SingleLeafOscillator birchOscillator("LeafDisplacements2.txt");
-CombinedLeafOscillator comboOscillator1(ivyOscillator, birchOscillator);
-CombinedLeafOscillator comboOscillator2(ivyOscillator, birchOscillator);
+CombinedLeafOscillator ll1ComboOscillator(ivyOscillator, birchOscillator);
+CombinedLeafOscillator ll2ComboOscillator(ivyOscillator, birchOscillator);
+CombinedLeafOscillator ll1HorizontalMotionComboOscillator(ivyOscillator, birchOscillator);
+CombinedLeafOscillator ll2HorizontalMotionComboOscillator(ivyOscillator, birchOscillator);
+CombinedLeafOscillator ll1VerticalMotionComboOscillator(ivyOscillator, birchOscillator);
+CombinedLeafOscillator ll2VerticalMotionComboOscillator(ivyOscillator, birchOscillator);
 
 struct LeafLooper {
   Pose p;
@@ -164,14 +158,15 @@ struct LeafLooper {
 
     // DEBUG
     addCone(directionCone, 0.1, Vec3f(0, 0, -0.8));  // by default we treat objects as facing in the negative z direction
+    directionCone.generateNormals();
   }
 
   void draw(Graphics& g) {
     g.pushMatrix();
     g.blendOn();
     g.blendModeTrans();
+    g.translate(p.pos());
     g.rotate(p);
-    g.translate(-p.pos());
     for(auto& radialStrip : radialStrips) {
       g.draw(radialStrip);
     }
@@ -268,7 +263,7 @@ public:
 
   bool firstDrawDone = false;
 
-  LeafLoops() : ll1(comboOscillator1), ll2(comboOscillator2) {
+  LeafLoops() : ll1(ll1ComboOscillator), ll2(ll2ComboOscillator) {
     anaylsisPlayer.load(fullPathOrDie(ANALYSIS_SOUND_FILE_NAME).c_str());
     anaylsisPlayer.pos(FFT_SIZE); // give the analysisPlayer a headstart of FFT_SIZE, to compensate for the lag in analysis
     playbackPlayer.load(fullPathOrDie(PLAYBACK_SOUND_FILE_NAME).c_str());
@@ -283,7 +278,6 @@ public:
 
     loadDownbeats(downbeats);
 
-    ll1.showDirectionCone = false;
     paused = false;
   }
 
@@ -383,10 +377,10 @@ public:
         doOneFrame = true;
         break;
       case '5':
-        comboOscillator2.setWeighting(std::max(comboOscillator2.weighting - 0.05, 0.0));
+        ll1ComboOscillator.setWeighting(std::max(ll1ComboOscillator.weighting - 0.05, 0.0));
         break;
       case '6':
-        comboOscillator2.setWeighting(std::min(comboOscillator2.weighting + 0.05, 1.0));
+        ll1ComboOscillator.setWeighting(std::min(ll1ComboOscillator.weighting + 0.05, 1.0));
         break;
     }
   }
@@ -397,3 +391,19 @@ int main() {
   app.maker.start();
   app.start();
 }
+
+/*   SEGFAULT LLDB INFO:
+
+Process 40775 stopped
+* thread #9, name = 'com.apple.audio.IOThread.client', stop reason = EXC_BAD_ACCESS (code=1, address=0x3101c3a9)
+    frame #0: 0x0000000003c032cb CoreAudio`AUConverterBase::RenderBus(unsigned int&, AudioTimeStamp const&, unsigned int, unsigned int) + 871
+CoreAudio`AUConverterBase::RenderBus:
+->  0x3c032cb <+871>: callq  *0x250(%rax)
+    0x3c032d1 <+877>: xorl   %eax, %eax
+    0x3c032d3 <+879>: cmpb   $0x0, -0x2d(%rbp)
+    0x3c032d7 <+883>: je     0x3c032e5                 ; <+897>
+Target 0: (_Users_mpevans_Documents_Winter2018_MAT201B_AlloSystem_marc_evans_final_simulator) stopped.
+
+Also seems to be similar:
+https://github.com/AudioNet/node-core-audio/issues/29
+*/

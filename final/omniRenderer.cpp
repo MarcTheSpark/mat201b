@@ -56,7 +56,7 @@ struct LeafLooper {
 
 };
 
-class LeafLoops : public App {
+class LeafLoops : public OmniStereoGraphicsRenderer {
 public:
   LeafLooper lls[NUM_LEAF_LOOPERS];
   State state;
@@ -65,8 +65,8 @@ public:
 
   LeafLoops() {
     initWindow(Window::Dim(900, 600), "Leaf Loops");
-    nav().pos(0, 0, 0);
-    nav().faceToward(Vec3d(0, 0, -1), Vec3d(0, 1, 0));
+    pose.pos(0, 0, 0);
+    pose.faceToward(Vec3d(0, 0, -1), Vec3d(0, 1, 0));
     lls[0].p.pos(-1, 0, -7);
     lls[0].p.faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
     lls[1].p.pos(1, 0, -7);
@@ -75,7 +75,7 @@ public:
 
   void onAnimate(double dt) override {
     taker.get(state);
-    nav().set(state.navPose);
+    pose = state.navPose;
     for(; framenum < state.framenum; framenum++) {
       for(int whichlooper=0; whichlooper < NUM_LEAF_LOOPERS; ++whichlooper) {
         LeafLooperData& llData = state.llDatas[whichlooper];
