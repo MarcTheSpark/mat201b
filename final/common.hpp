@@ -9,26 +9,42 @@
 #define NUM_LEAF_LOOPERS (2)
 #define REDUNDANCY (5)
 
-#include "allocore/io/al_App.hpp"
+#include <cmath>
+#include <iostream>
+#include <vector>
+#include <deque>
+
+#include "Cuttlebone/Cuttlebone.hpp"
+#include "allocore/al_Allocore.hpp"
 using namespace al;
 
 // Common definition of application state
 //
-struct StripPseudoMesh
+template <size_t MESH_SIZE>
+struct PseudoMesh
 {
-	Vec3f vertices[FFT_SIZE];
- 	Color colors[FFT_SIZE];
+	Vec3f vertices[MESH_SIZE];
+ 	Color colors[MESH_SIZE];
 };
 
 struct LeafLooperData
 {
-	StripPseudoMesh latestStrips[REDUNDANCY];
+	PseudoMesh<FFT_SIZE> latestStrips[REDUNDANCY];
+	PseudoMesh<2> latestTrailPoints[REDUNDANCY];
+
 	Pose p;
 
 	void shiftStrips() {
 		// not efficient, but simple
 		for(int i = 0; i < REDUNDANCY - 1; ++i) {
 			latestStrips[i] = latestStrips[i+1];
+		}
+	}
+
+	void shiftTrail() {
+		// not efficient, but simple
+		for(int i = 0; i < REDUNDANCY - 1; ++i) {
+			latestTrailPoints[i] = latestTrailPoints[i+1];
 		}
 	}
 };

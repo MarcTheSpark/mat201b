@@ -14,12 +14,11 @@
 #include <cassert>
 #include <iostream>
 #include <fstream>
-#include <deque>
-#include "allocore/io/al_App.hpp"
 #include "Gamma/SamplePlayer.h"
 #include "Gamma/DFT.h"
-#include "Cuttlebone/Cuttlebone.hpp"
 #include "common.hpp"
+#include "alloutil/al_AlloSphereAudioSpatializer.hpp"
+#include "alloutil/al_Simulator.hpp"
 using namespace al;
 using namespace std;
 using namespace gam;
@@ -125,7 +124,7 @@ CombinedLeafOscillator ll2HorizontalMotionComboOscillator(ivyOscillator, birchOs
 CombinedLeafOscillator ll1VerticalMotionComboOscillator(ivyOscillator, birchOscillator);
 CombinedLeafOscillator ll2VerticalMotionComboOscillator(ivyOscillator, birchOscillator);
 
-struct LeafLooper {
+struct LeafLooper : SoundSource{
   Pose p;
   STFT stft;
   deque<Buffer<Vec3f>> radialStripVertices;
@@ -222,15 +221,19 @@ struct LeafLooper {
     radialStripVertices.push_back(newRadialStripVertices);
     radialStripColors.push_back(newRadialStripColors);
     pushNewStripMesh();
-    if(trackHistory) {
-      history.vertex(p.pos() + Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()) * maxMag / 10 );
-      history.color(Color(llColor.r, llColor.g, llColor.b, maxMag));
-      history.vertex(p.pos() + Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()) * maxMag / 10 );
-      history.color(Color(llColor.r, llColor.g, llColor.b, maxMag));
-    }
+    if(trackHistory) pushNewHistoryPoints(maxMag);
   }
 
   private:
+  void pushNewHistoryPoints(float maxMag) {
+    llData.shiftTrail();
+    PseudoMesh<2>& newestTrailPoints = llData.latestTrailPoints[REDUNDANCY-1];
+    history.vertex(p.pos() + Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()) * maxMag / 10 );
+    history.color(Color(llColor.r, llColor.g, llColor.b, maxMag));
+    history.vertex(p.pos() + Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()) * maxMag / 10 );
+    history.color(Color(llColor.r, llColor.g, llColor.b, maxMag));
+  }
+
   void pushNewStripMesh() {
     // Construct a new strip mesh out of the last two sets of vertices and colors we added
     if(radialStripVertices.size() > 1) {
@@ -241,7 +244,7 @@ struct LeafLooper {
       Mesh radialStrip;
 
       llData.shiftStrips();
-      StripPseudoMesh& newestPseudoStrip = llData.latestStrips[REDUNDANCY-1];
+      PseudoMesh<FFT_SIZE>& newestPseudoStrip = llData.latestStrips[REDUNDANCY-1];
 
       radialStrip.primitive(Graphics::TRIANGLE_STRIP);
       for(int i = 0; i < FFT_SIZE / 2; i++) {
@@ -270,8 +273,7 @@ struct LeafLooper {
   }
 };
 
-class LeafLoops : public App {
-public:
+struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient {
 
   State state;
   cuttlebone::Maker<State> maker;
@@ -296,12 +298,15 @@ public:
   float ll2HorizontalMotionFreq = 0.08, ll2VerticalMotionFreq = 0.05;
   float ll2HMotionRadiusMul = 8.0, ll2VMotionRadiusMul = 4.0;
 
-  LeafLoops() : ll1(ll1ComboOscillator, Color(0.8, 0.8, 0.0)), ll2(ll2ComboOscillator, Color(0.0, 0.8, 0.8)) {
+  LeafLoops() 
+    : maker(Simulator::defaultBroadcastIP()),
+      InterfaceServerClient(Simulator::defaultInterfaceServerIP()),
+      ll1(ll1ComboOscillator, Color(0.8, 0.8, 0.0)), 
+      ll2(ll2ComboOscillator, Color(0.0, 0.8, 0.8)) {
     anaylsisPlayer.load(fullPathOrDie(ANALYSIS_SOUND_FILE_NAME).c_str());
     anaylsisPlayer.pos(FFT_SIZE); // give the analysisPlayer a headstart of FFT_SIZE, to compensate for the lag in analysis
     playbackPlayer.load(fullPathOrDie(PLAYBACK_SOUND_FILE_NAME).c_str());
     initWindow(Window::Dim(900, 600), "Leaf Loops");
-    initAudio(SAMPLE_RATE);
     nav().pos(0, 20, 0);
     nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 0, -1));
     ll1.p.pos(0, 0, -3);
@@ -314,6 +319,19 @@ public:
     initializeMotionVariables();
 
     paused = false;
+
+    // initAudio(SAMPLE_RATE);
+    // audio
+    AlloSphereAudioSpatializer::initAudio(SAMPLE_RATE);
+    AlloSphereAudioSpatializer::initSpatialization();
+    // if gamma
+    gam::Sync::master().spu(AlloSphereAudioSpatializer::audioIO().fps());
+    scene()->addSource(ll1);
+    ll1.dopplerType(DOPPLER_NONE);
+    scene()->addSource(ll2);
+    ll2.dopplerType(DOPPLER_NONE);
+    // scene()->usePerSampleProcessing(true);
+    scene()->usePerSampleProcessing(false);
   }
 
   void initializeMotionVariables() {
@@ -327,6 +345,8 @@ public:
   }
 
   void onAnimate(double dt) override {
+    while (InterfaceServerClient::oscRecv().recv()) {}
+
     if (!paused || doOneFrame) {
       doOneFrame = false;
       float measurePhase = getMeasurePhase(dt);
@@ -433,18 +453,24 @@ public:
 
   void onSound(AudioIOData& io) override {
     if(!firstDrawDone || (paused && !doOneFrame)) { return; }
-    gam::Sync::master().spu(audioIO().fps());
+    ll1.pose(ll1.p);
+    ll2.pose(ll2.p);
     while (io()) {
       for(int chan = 0; chan < 2; ++chan) {
         float sampForAnalysis = anaylsisPlayer.read(chan);
         float sampForPlayback = playbackPlayer.read(chan);
         if(chan == 0) { ll1(sampForAnalysis); }
         if(chan == 1) { ll2(sampForAnalysis); }
-        io.out(chan) = sampForPlayback;
+
+        if(chan == 0) { ll1.writeSample(sampForPlayback); }
+        if(chan == 1) { ll2.writeSample(sampForPlayback); }
+        // io.out(chan) = sampForPlayback;
       }
       anaylsisPlayer.advance();
       playbackPlayer.advance();
     }
+    listener()->pose(nav());
+    scene()->render(io);
   }
 
   void onKeyDown (const Keyboard &k) override {
@@ -489,6 +515,8 @@ public:
 
 int main() {
   LeafLoops app;
+  app.AlloSphereAudioSpatializer::audioIO().start();
+  app.InterfaceServerClient::connect();
   app.maker.start();
   app.start();
 }

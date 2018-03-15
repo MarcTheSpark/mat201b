@@ -7,9 +7,6 @@
 #include <iostream>
 #include <fstream>
 
-#include <deque>
-#include "allocore/io/al_App.hpp"
-#include "Cuttlebone/Cuttlebone.hpp"
 #include "common.hpp"
 #include "alloutil/al_OmniStereoGraphicsRenderer.hpp"
 
@@ -75,13 +72,13 @@ public:
 
   void onAnimate(double dt) override {
     taker.get(state);
-    pose = state.navPose;
+    pose.set(state.navPose);
     for(; framenum < state.framenum; framenum++) {
       for(int whichlooper=0; whichlooper < NUM_LEAF_LOOPERS; ++whichlooper) {
         LeafLooperData& llData = state.llDatas[whichlooper];
         lls[whichlooper].p = llData.p;
         if(state.framenum - framenum <= REDUNDANCY) {
-          StripPseudoMesh& thisStrip = llData.latestStrips[REDUNDANCY - (state.framenum - framenum)];
+          PseudoMesh<FFT_SIZE>& thisStrip = llData.latestStrips[REDUNDANCY - (state.framenum - framenum)];
           
           Mesh newStrip;
           newStrip.primitive(Graphics::TRIANGLE_STRIP);
@@ -96,6 +93,10 @@ public:
   }
 
   void onDraw(Graphics& g) override {
+    // you may need these later
+    // shader().uniform("texture", 1.0);
+    // shader().uniform("lighting", 1.0);
+    //
     for(LeafLooper& ll : lls) {
       ll.draw(g);
     }

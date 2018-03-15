@@ -7,11 +7,7 @@
 #include <iostream>
 #include <fstream>
 
-#include <deque>
-#include "allocore/io/al_App.hpp"
-#include "Cuttlebone/Cuttlebone.hpp"
 #include "common.hpp"
-#include "alloutil/al_OmniStereoGraphicsRenderer.hpp"
 
 using namespace al;
 using namespace std;
@@ -81,7 +77,7 @@ public:
         LeafLooperData& llData = state.llDatas[whichlooper];
         lls[whichlooper].p = llData.p;
         if(state.framenum - framenum <= REDUNDANCY) {
-          StripPseudoMesh& thisStrip = llData.latestStrips[REDUNDANCY - (state.framenum - framenum)];
+          PseudoMesh<FFT_SIZE>& thisStrip = llData.latestStrips[REDUNDANCY - (state.framenum - framenum)];
           
           Mesh newStrip;
           newStrip.primitive(Graphics::TRIANGLE_STRIP);
