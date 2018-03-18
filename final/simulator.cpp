@@ -24,6 +24,8 @@ using namespace al;
 using namespace std;
 using namespace gam;
 
+#include "alloGLV/al_ControlGLV.hpp"
+#include "GLV/glv.h"
 
 // CONTROLS: Press 1 to pause playback, 2 to skip backwards 10 seconds in the soundfile, 3 to skip forwards 10 seconds, 4 to step forward one frame when paused
 
@@ -191,7 +193,6 @@ struct LeafLooper : SoundSource {
   }
 
   void draw(Graphics& g) {
-    g.color(llColor);
     g.blendOn();
     g.blendModeTrans();
     g.pushMatrix();
@@ -234,7 +235,7 @@ struct LeafLooper : SoundSource {
       float adjustedPhase2 = phase2 + rnd::uniformS() * 0.5 * fftMagnitudes.at(i); // 0.5*M_PI; 
       // add randomness to phase 2, and clip it
       newRadialStripVertices.append(Vec3f(-radius*cos(angle)*sin(adjustedPhase2), radius*sin(angle), radius*cos(adjustedPhase2)));
-      newRadialStripColors.append(Color(1, 1, 1, fftMagnitudes.at(i)));
+      newRadialStripColors.append(Color(llColor.r, llColor.g, llColor.b, fftMagnitudes.at(i)));
     }
     radialStripVertices.push_back(newRadialStripVertices);
     radialStripColors.push_back(newRadialStripColors);
@@ -362,7 +363,7 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
     : maker(Simulator::defaultBroadcastIP()),
       InterfaceServerClient(Simulator::defaultInterfaceServerIP()),
       ll1(ll1ComboOscillator, Color(0.8, 0.8, 0.0)), 
-      ll2(ll2ComboOscillator, Color(0.0, 0.8, 0.8)) {
+      ll2(ll2ComboOscillator, Color(0.0, 0.3, 0.8)) {
     anaylsisPlayer.load(fullPathOrDie(ANALYSIS_SOUND_FILE_NAME).c_str());
     anaylsisPlayer.pos(FFT_SIZE); // give the analysisPlayer a headstart of FFT_SIZE, to compensate for the lag in analysis
     playbackPlayer.load(fullPathOrDie(PLAYBACK_SOUND_FILE_NAME).c_str());
@@ -529,8 +530,8 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
         if(chan == 0) { ll1(sampForAnalysis); }
         if(chan == 1) { ll2(sampForAnalysis); }
 
-        // if(chan == 0) { ll1.writeSample(sampForPlayback); }
-        // if(chan == 1) { ll2.writeSample(sampForPlayback); }
+        if(chan == 0) { ll1.writeSample(sampForPlayback); }
+        if(chan == 1) { ll2.writeSample(sampForPlayback); }
         io.out(chan) = sampForPlayback;
       }
       anaylsisPlayer.advance();

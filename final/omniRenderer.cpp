@@ -32,6 +32,8 @@ struct LeafLooper {
   float trailAlphaDecayFactor;
   bool doTrail;
 
+  Color llColor;
+
   LeafLooper() {}
 
   void pushNewStrip(Mesh strip) {
