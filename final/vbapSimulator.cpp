@@ -6,10 +6,13 @@
 #define ANALYSIS_SOUND_FILE_NAME ("EvansLeafLoopsDryDPA.ogg")
 #define PLAYBACK_SOUND_FILE_NAME ("EvansLeafLoopsFinal.ogg")
 #define SAMPLE_RATE (48000)
+#define BLOCK_SIZE (256)
 #define FFT_SIZE (1024)
 #define REDUNDANCY (5)
 #define VISUAL_DECAY (0.8)
 #define MIN_DIST (3)
+
+#define IN_SPHERE (false)
 
 #include <cassert>
 #include <iostream>
@@ -18,7 +21,7 @@
 #include "Gamma/SamplePlayer.h"
 #include "Gamma/DFT.h"
 #include "common.hpp"
-#include "alloutil/al_AlloSphereAudioSpatializer.hpp"
+#include "alloutil/al_AlloSphereSpeakerLayout.hpp"
 #include "alloutil/al_Simulator.hpp"
 using namespace al;
 using namespace std;
@@ -334,7 +337,12 @@ struct LeafLooper : SoundSource {
   }
 };
 
-struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient {
+
+struct LeafLoops : public App, InterfaceServerClient {
+  AudioScene scene;
+  SpeakerLayout* speakerLayout;
+  Spatializer* panner;
+  Listener* listener;
 
   State state;
   cuttlebone::Maker<State> maker;
@@ -363,7 +371,8 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
     : maker(Simulator::defaultBroadcastIP()),
       InterfaceServerClient(Simulator::defaultInterfaceServerIP()),
       ll1(ll1ComboOscillator, Color(0.8, 0.8, 0.0)), 
-      ll2(ll2ComboOscillator, Color(0.0, 0.3, 0.8)) {
+      ll2(ll2ComboOscillator, Color(0.0, 0.3, 0.8)),
+      scene(BLOCK_SIZE) {
     anaylsisPlayer.load(fullPathOrDie(ANALYSIS_SOUND_FILE_NAME).c_str());
     anaylsisPlayer.pos(FFT_SIZE); // give the analysisPlayer a headstart of FFT_SIZE, to compensate for the lag in analysis
     playbackPlayer.load(fullPathOrDie(PLAYBACK_SOUND_FILE_NAME).c_str());
@@ -381,18 +390,36 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
 
     paused = false;
 
-    // initAudio(SAMPLE_RATE);
-    // audio
-    AlloSphereAudioSpatializer::initAudio(SAMPLE_RATE);
-    AlloSphereAudioSpatializer::initSpatialization();
-    // if gamma
-    gam::Sync::master().spu(AlloSphereAudioSpatializer::audioIO().fps());
-    scene()->addSource(ll1);
-    ll1.dopplerType(DOPPLER_NONE);
-    scene()->addSource(ll2);
-    ll2.dopplerType(DOPPLER_NONE);
-    scene()->usePerSampleProcessing(true);
-    // scene()->usePerSampleProcessing(false);
+    initAudio(SAMPLE_RATE);
+    gam::Sync::master().spu(audioIO().fps());
+
+
+    // scene->addSource(ll1);
+    // ll1.dopplerType(DOPPLER_NONE);
+    // scene()->addSource(ll2);
+    // ll2.dopplerType(DOPPLER_NONE);
+
+    if (!IN_SPHERE) {
+      speakerLayout = new HeadsetSpeakerLayout();
+      panner = new StereoPanner(*speakerLayout);
+    } else {
+      speakerLayout = new AlloSphereSpeakerLayout();
+      panner = new Vbap(*speakerLayout);
+    }
+
+    listener = scene.createListener(panner);
+    listener->compile();
+
+    std::vector<LeafLooper> sources = {ll1, ll2};
+    for (LeafLooper& source : sources) {
+      source.nearClip(0.5);
+      source.farClip(20); 
+      source.dopplerType(DOPPLER_NONE); // XXX doppler kills when moving fast!
+      source.law(ATTEN_LINEAR);
+      scene.addSource(source);
+    }
+    scene.usePerSampleProcessing(false);
+    //scene.usePerSampleProcessing(true);
   }
 
   void initializeMotionVariables() {
@@ -540,8 +567,8 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
       anaylsisPlayer.advance();
       playbackPlayer.advance();
     }
-    listener()->pose(nav());
-    scene()->render(io);
+    listener->pose(nav());
+    scene.render(io);
   }
 
   void onKeyDown (const Keyboard &k) override {
@@ -586,24 +613,22 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
 
 int main() {
   LeafLoops app;
-  app.AlloSphereAudioSpatializer::audioIO().start();
   app.InterfaceServerClient::connect();
   app.maker.start();
   app.start();
 }
 
-/*   SEGFAULT LLDB INFO:
+/* LLDB ERROR INFO:
 
-Process 40775 stopped
-* thread #9, name = 'com.apple.audio.IOThread.client', stop reason = EXC_BAD_ACCESS (code=1, address=0x3101c3a9)
-    frame #0: 0x0000000003c032cb CoreAudio`AUConverterBase::RenderBus(unsigned int&, AudioTimeStamp const&, unsigned int, unsigned int) + 871
-CoreAudio`AUConverterBase::RenderBus:
-->  0x3c032cb <+871>: callq  *0x250(%rax)
-    0x3c032d1 <+877>: xorl   %eax, %eax
-    0x3c032d3 <+879>: cmpb   $0x0, -0x2d(%rbp)
-    0x3c032d7 <+883>: je     0x3c032e5                 ; <+897>
-Target 0: (_Users_mpevans_Documents_Winter2018_MAT201B_AlloSystem_marc_evans_final_simulator) stopped.
-
-Also seems to be similar:
-https://github.com/AudioNet/node-core-audio/issues/29
+_Users_mpevans_Documents_Winter2018_MAT201B_AlloSystem_marc_evans_final_vbapSimulator(53090,0x7fffd145e3c0) malloc: *** error for object 0x2845400: pointer being freed was not allocated
+*** set a breakpoint in malloc_error_break to debug
+Process 53090 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = signal SIGABRT
+    frame #0: 0x00007fffc8622d42 libsystem_kernel.dylib`__pthread_kill + 10
+libsystem_kernel.dylib`__pthread_kill:
+->  0x7fffc8622d42 <+10>: jae    0x7fffc8622d4c            ; <+20>
+    0x7fffc8622d44 <+12>: movq   %rax, %rdi
+    0x7fffc8622d47 <+15>: jmp    0x7fffc861bcaf            ; cerror_nocancel
+    0x7fffc8622d4c <+20>: retq   
+Target 0: (_Users_mpevans_Documents_Winter2018_MAT201B_AlloSystem_marc_evans_final_vbapSimulator) stopped.
 */
