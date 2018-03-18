@@ -533,15 +533,15 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
         if(chan == 0) { ll1(sampForAnalysis); }
         if(chan == 1) { ll2(sampForAnalysis); }
 
-        if(chan == 0) { ll1.writeSample(sampForPlayback * mul1); }
-        if(chan == 1) { ll2.writeSample(sampForPlayback * mul2); }
-        // io.out(chan) = sampForPlayback;
+        // if(chan == 0) { ll1.writeSample(sampForPlayback * mul1); }
+        // if(chan == 1) { ll2.writeSample(sampForPlayback * mul2); }
+        io.out(chan) = sampForPlayback;
       }
       anaylsisPlayer.advance();
       playbackPlayer.advance();
     }
     listener()->pose(nav());
-    scene()->render(io);
+    // scene()->render(io);
   }
 
   void onKeyDown (const Keyboard &k) override {
