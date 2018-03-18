@@ -14,6 +14,7 @@
 #include <cassert>
 #include <iostream>
 #include <fstream>
+#include <algorithm>
 #include "Gamma/SamplePlayer.h"
 #include "Gamma/DFT.h"
 #include "common.hpp"
@@ -29,9 +30,10 @@ using namespace gam;
 
 // Notes to self:
 
-// TODO: figure out why hybrid leaf jumps
-// TODO: make leaf motion code cleaner
-// TODO: try extruding something.
+// TODO: extruding structure in a complete way
+// TODO: Controls over color, size, distance in the simulator
+// TODO: A background
+
 
 // Will animate: leaf size, leaf orientation (where the top is pointing), color based on structural parameters
 // THOSE TOOLKITS
@@ -106,12 +108,19 @@ struct CombinedLeafOscillator : LeafOscillator {
     weighting = w;
   }
 
-  float getAngle(float phase) {
-    return (1 - weighting) * lfo1.getAngle(phase) + weighting * lfo2.getAngle(phase);
-  }
-
   float getRadius(float phase) {
     return (1 - weighting) * lfo1.getRadius(phase) + weighting * lfo2.getRadius(phase);
+  }
+
+  float getAngle(float phase) {
+    // averaging angles takes a little more care, due to the cyclical nature
+    float angle1 = lfo1.getAngle(phase);
+    float angle2 = lfo2.getAngle(phase);
+    if (angle1 - angle2 > M_PI) angle2 += 2 * M_PI;
+    else if (angle2 - angle1 > M_PI) angle1 += 2 * M_PI;
+    float averageAngle = (1 - weighting) * angle1 + weighting * angle2;
+    if (averageAngle > 2 * M_PI) return averageAngle - 2 * M_PI;
+    else return averageAngle;
   }
 };
 
@@ -124,15 +133,19 @@ CombinedLeafOscillator ll2HorizontalMotionComboOscillator(ivyOscillator, birchOs
 CombinedLeafOscillator ll1VerticalMotionComboOscillator(ivyOscillator, birchOscillator);
 CombinedLeafOscillator ll2VerticalMotionComboOscillator(ivyOscillator, birchOscillator);
 
-struct LeafLooper : SoundSource{
+struct LeafLooper : SoundSource {
   Pose p;
   STFT stft;
   deque<Buffer<Vec3f>> radialStripVertices;
   deque<Buffer<Color>> radialStripColors;
   deque<Mesh> radialStrips;
 
-  Mesh history;
-  bool trackHistory = false;
+  Mesh trail;
+  deque<Vec3f> trailVertices;
+  deque<Color> trailColors;
+  unsigned maxTrailLength = 0;
+  float trailAlphaDecayFactor = 0.99;
+  bool doTrail = true;
 
   int maxStrips = 60;
 
@@ -163,11 +176,18 @@ struct LeafLooper : SoundSource{
     }
     fftMagnitudes.resize(FFT_SIZE/2);
 
-    history.primitive(Graphics::TRIANGLE_STRIP);
+    trail.primitive(Graphics::TRIANGLE_STRIP);
 
     // DEBUG
     addCone(directionCone, 0.1, Vec3f(0, 0, -0.8));  // by default we treat objects as facing in the negative z direction
     directionCone.generateNormals();
+
+    setTrailLengthInSeconds(15);
+  }
+
+  void setTrailLengthInSeconds(float seconds) {
+    maxTrailLength = seconds * 40 * NUM_TRAIL_POINTS_PER_FRAME;
+    trailAlphaDecayFactor = exp(log(0.05) * NUM_TRAIL_POINTS_PER_FRAME / maxTrailLength);
   }
 
   void draw(Graphics& g) {
@@ -185,8 +205,8 @@ struct LeafLooper : SoundSource{
       g.draw(directionCone);
     }
     g.popMatrix();
-    if(trackHistory) {
-      g.draw(history);
+    if(doTrail) {
+      g.draw(trail);
     }
   }
 
@@ -203,10 +223,10 @@ struct LeafLooper : SoundSource{
   }
 
   void pushNewStrip(float phase, float phase2) {
-    float maxMag = 0;
     // ADD A NEW STRIP OF VERTICES AND COLORS
     Buffer<Vec3f> newRadialStripVertices;
     Buffer<Color> newRadialStripColors;
+
     for(int i = 0; i < FFT_SIZE / 2; i++) {
       float radius = binRadii.at(i) * lfo.getRadius(phase);
       float angle = lfo.getAngle(phase);
@@ -215,23 +235,63 @@ struct LeafLooper : SoundSource{
       // add randomness to phase 2, and clip it
       newRadialStripVertices.append(Vec3f(-radius*cos(angle)*sin(adjustedPhase2), radius*sin(angle), radius*cos(adjustedPhase2)));
       newRadialStripColors.append(Color(1, 1, 1, fftMagnitudes.at(i)));
-
-      if(fftMagnitudes.at(i) > maxMag) { maxMag = fftMagnitudes.at(i); }
     }
     radialStripVertices.push_back(newRadialStripVertices);
     radialStripColors.push_back(newRadialStripColors);
     pushNewStripMesh();
-    if(trackHistory) pushNewHistoryPoints(maxMag);
+
+    std::vector<int> binsByMagnitude(fftMagnitudes.size());
+    std::iota(binsByMagnitude.begin(), binsByMagnitude.end(), 0);
+    // std::vector<float>& fftMagnitudes = this->fftMagnitudes;
+    std::sort(binsByMagnitude.begin(), binsByMagnitude.end(),
+      [&](int a, int b) {  
+        return (fftMagnitudes.at(a) > fftMagnitudes.at(b));  
+      }
+    );
+    std::vector<Vec3f> topMagVertices;
+    std::vector<Color> topMagColors;
+    for(int i = 0; i < NUM_TRAIL_POINTS_PER_FRAME; ++i) {
+      int thisBin = binsByMagnitude.at(i);
+      Vec3f& thisVertex = newRadialStripVertices[thisBin];
+      // need to translate the vertex to world coordinates. This was a little tricky...
+      topMagVertices.push_back(p.pos() + p.ur() * thisVertex.x + p.uu() * thisVertex.y - p.uf() * thisVertex.z);
+      Color thisColor(newRadialStripColors[thisBin]);
+      thisColor.a *= 0.2;
+      topMagColors.push_back(thisColor);
+    }
+    if(doTrail) {
+      pushNewTrailPoints(topMagVertices, topMagColors);
+    }
   }
 
   private:
-  void pushNewHistoryPoints(float maxMag) {
+  void pushNewTrailPoints(std::vector<Vec3f>& newVertices, std::vector<Color>& newColors) {
     llData.shiftTrail();
-    PseudoMesh<2>& newestTrailPoints = llData.latestTrailPoints[REDUNDANCY-1];
-    history.vertex(p.pos() + Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()) * maxMag / 10 );
-    history.color(Color(llColor.r, llColor.g, llColor.b, maxMag));
-    history.vertex(p.pos() + Vec3f(rnd::uniformS(), rnd::uniformS(), rnd::uniformS()) * maxMag / 10 );
-    history.color(Color(llColor.r, llColor.g, llColor.b, maxMag));
+    PseudoMesh<NUM_TRAIL_POINTS_PER_FRAME>& newestTrailPoints = llData.latestTrailPoints[REDUNDANCY-1];
+
+    for(int i=0; i < NUM_TRAIL_POINTS_PER_FRAME; ++i) {
+      trailVertices.push_back(newVertices.at(i));
+      newestTrailPoints.vertices[i] = newVertices.at(i);
+      trailColors.push_back(newColors.at(i));
+      newestTrailPoints.colors[i] = newColors.at(i);
+    }
+
+    while(trailVertices.size() > maxTrailLength) {
+      trailVertices.pop_front();
+      trailColors.pop_front();
+    }
+
+    for (Color& c : trailColors) { c.a *= trailAlphaDecayFactor; }
+
+    trail.vertices().reset();
+    trail.colors().reset();
+
+    for(int i = 0; i < trailVertices.size() - NUM_TRAIL_POINTS_PER_FRAME; ++i) { 
+      trail.vertex(trailVertices.at(i));
+      trail.color(trailColors.at(i));
+      trail.vertex(trailVertices.at(i + NUM_TRAIL_POINTS_PER_FRAME)); 
+      trail.color(trailColors.at(i + NUM_TRAIL_POINTS_PER_FRAME));
+    }
   }
 
   void pushNewStripMesh() {
@@ -292,11 +352,11 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
   // Motion
   float ll1HorizontalMotionPhase = 0, ll1VerticalMotionPhase = 0;
   float ll1HorizontalMotionFreq = 0.08, ll1VerticalMotionFreq = 0.05;
-  float ll1HMotionRadiusMul = 8.0, ll1VMotionRadiusMul = 4.0;
+  float ll1HMotionRadiusMul = 8.0, ll1VMotionRadiusMul = 7.0;
 
   float ll2HorizontalMotionPhase = 0, ll2VerticalMotionPhase = 0;
   float ll2HorizontalMotionFreq = 0.08, ll2VerticalMotionFreq = 0.05;
-  float ll2HMotionRadiusMul = 8.0, ll2VMotionRadiusMul = 4.0;
+  float ll2HMotionRadiusMul = 8.0, ll2VMotionRadiusMul = 7.0;
 
   LeafLoops() 
     : maker(Simulator::defaultBroadcastIP()),
@@ -435,6 +495,13 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
     // transfer the poses to the cuttlebone-friendly data structure of each leaf looper
     ll1.llData.p = ll1.p;
     ll2.llData.p = ll2.p;
+    ll1.llData.maxTrailLength = ll1.maxTrailLength;
+    ll2.llData.maxTrailLength = ll2.maxTrailLength;
+    ll1.llData.trailAlphaDecayFactor = ll1.trailAlphaDecayFactor;
+    ll2.llData.trailAlphaDecayFactor = ll2.trailAlphaDecayFactor;
+    ll1.llData.doTrail = ll1.doTrail;
+    ll2.llData.doTrail = ll2.doTrail;
+
     // set those to cuttlebone-friendly data structures in the cuttlebone maker
     state.llDatas[0] = ll1.llData;
     state.llDatas[1] = ll2.llData;
@@ -462,15 +529,15 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
         if(chan == 0) { ll1(sampForAnalysis); }
         if(chan == 1) { ll2(sampForAnalysis); }
 
-        if(chan == 0) { ll1.writeSample(sampForPlayback); }
-        if(chan == 1) { ll2.writeSample(sampForPlayback); }
-        // io.out(chan) = sampForPlayback;
+        // if(chan == 0) { ll1.writeSample(sampForPlayback); }
+        // if(chan == 1) { ll2.writeSample(sampForPlayback); }
+        io.out(chan) = sampForPlayback;
       }
       anaylsisPlayer.advance();
       playbackPlayer.advance();
     }
     listener()->pose(nav());
-    scene()->render(io);
+    // scene()->render(io);
   }
 
   void onKeyDown (const Keyboard &k) override {
@@ -506,8 +573,8 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
         nav().faceToward(Vec3d(0, 0, -1), Vec3d(0, 1, 0));
         break;
       case '0':
-        ll1.trackHistory = !ll1.trackHistory;
-        ll2.trackHistory = !ll2.trackHistory;
+        ll1.doTrail = !ll1.doTrail;
+        ll2.doTrail = !ll2.doTrail;
         break;
     }
   }

@@ -25,6 +25,13 @@ struct LeafLooper {
   deque<Mesh> radialStrips;
   int maxStrips = 60;
 
+  Mesh trail;
+  deque<Vec3f> trailVertices;
+  deque<Color> trailColors;
+  int maxTrailLength;
+  float trailAlphaDecayFactor;
+  bool doTrail;
+
   LeafLooper() {}
 
   void pushNewStrip(Mesh strip) {
@@ -36,6 +43,31 @@ struct LeafLooper {
       for(auto& color : radialStrip.colors()) {
         color.a *= VISUAL_DECAY;
       }
+    }
+    trail.primitive(Graphics::TRIANGLE_STRIP);
+  }
+
+  void pushNewTrailPoints(PseudoMesh<NUM_TRAIL_POINTS_PER_FRAME>& newTrailPoints) {
+    for(int i=0; i < NUM_TRAIL_POINTS_PER_FRAME; ++i) {
+      trailVertices.push_back(newTrailPoints.vertices[i]);
+      trailColors.push_back(newTrailPoints.colors[i]);
+    }
+
+    while(trailVertices.size() > maxTrailLength) {
+      trailVertices.pop_front();
+      trailColors.pop_front();
+    }
+
+    for (Color& c : trailColors) { c.a *= trailAlphaDecayFactor; }
+
+    trail.vertices().reset();
+    trail.colors().reset();
+
+    for(int i = 0; i < trailVertices.size() - NUM_TRAIL_POINTS_PER_FRAME; ++i) { 
+      trail.vertex(trailVertices.at(i));
+      trail.color(trailColors.at(i));
+      trail.vertex(trailVertices.at(i + NUM_TRAIL_POINTS_PER_FRAME)); 
+      trail.color(trailColors.at(i + NUM_TRAIL_POINTS_PER_FRAME));
     }
   }
 
@@ -49,8 +81,10 @@ struct LeafLooper {
       g.draw(radialStrip);
     }
     g.popMatrix();
+    if(doTrail) {
+      g.draw(trail);
+    }
   }
-
 };
 
 class LeafLoops : public OmniStereoGraphicsRenderer {
@@ -77,6 +111,10 @@ public:
       for(int whichlooper=0; whichlooper < NUM_LEAF_LOOPERS; ++whichlooper) {
         LeafLooperData& llData = state.llDatas[whichlooper];
         lls[whichlooper].p = llData.p;
+        lls[whichlooper].maxTrailLength = llData.maxTrailLength;
+        lls[whichlooper].trailAlphaDecayFactor = llData.trailAlphaDecayFactor;
+        lls[whichlooper].doTrail = llData.doTrail;
+
         if(state.framenum - framenum <= REDUNDANCY) {
           PseudoMesh<FFT_SIZE>& thisStrip = llData.latestStrips[REDUNDANCY - (state.framenum - framenum)];
           
@@ -87,6 +125,10 @@ public:
             newStrip.color(thisStrip.colors[i]);
           }
           lls[whichlooper].pushNewStrip(newStrip);
+        }
+        if(state.framenum - framenum <= REDUNDANCY) {
+          PseudoMesh<NUM_TRAIL_POINTS_PER_FRAME>& theseTrailPoints = llData.latestTrailPoints[REDUNDANCY - (state.framenum - framenum)];
+          lls[whichlooper].pushNewTrailPoints(theseTrailPoints);
         }
       }
     }

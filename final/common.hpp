@@ -8,6 +8,7 @@
 #define FFT_SIZE (1024)
 #define NUM_LEAF_LOOPERS (2)
 #define REDUNDANCY (5)
+#define NUM_TRAIL_POINTS_PER_FRAME (5)
 
 #include <cmath>
 #include <iostream>
@@ -30,9 +31,12 @@ struct PseudoMesh
 struct LeafLooperData
 {
 	PseudoMesh<FFT_SIZE> latestStrips[REDUNDANCY];
-	PseudoMesh<2> latestTrailPoints[REDUNDANCY];
+	PseudoMesh<NUM_TRAIL_POINTS_PER_FRAME> latestTrailPoints[REDUNDANCY];
 
 	Pose p;
+	int maxTrailLength;
+	float trailAlphaDecayFactor;
+	bool doTrail;
 
 	void shiftStrips() {
 		// not efficient, but simple
