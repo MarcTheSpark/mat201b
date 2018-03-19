@@ -56,6 +56,7 @@ struct LeafLooperData
 struct State {
   unsigned framenum = 0;
   Pose navPose;
+  Color bgColor;
   LeafLooperData llDatas[NUM_LEAF_LOOPERS];
 };
 

@@ -109,6 +109,7 @@ public:
   void onAnimate(double dt) override {
     taker.get(state);
     pose.set(state.navPose);
+    omni().clearColor() = state.bgColor;
     for(; framenum < state.framenum; framenum++) {
       for(int whichlooper=0; whichlooper < NUM_LEAF_LOOPERS; ++whichlooper) {
         LeafLooperData& llData = state.llDatas[whichlooper];

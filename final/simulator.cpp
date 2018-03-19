@@ -195,6 +195,7 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
 
   void checkGLVWidgets() {
     background(HSV(glvWidgets.bgColorPicker.getValue().components));
+    state.bgColor = HSV(glvWidgets.bgColorPicker.getValue().components);
     ll1.llColor = HSV(glvWidgets.ll1ColorPicker.getValue().components);
     ll2.llColor = HSV(glvWidgets.ll2ColorPicker.getValue().components);
     ll1.setBinRadii(glvWidgets.getLooperRadii());
