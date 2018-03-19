@@ -33,7 +33,7 @@ struct LeafLooper : SoundSource {
   float centerFrequency = 4000;
   float centerRadius = 1;
 
-  LeafOscillator& lfo;
+  CombinedLeafOscillator& lfo;
   vector<float> binRadii;
   vector<float> fftMagnitudes;
 
@@ -43,16 +43,12 @@ struct LeafLooper : SoundSource {
   Mesh directionCone;
   bool showDirectionCone = false;
 
-  LeafLooper(LeafOscillator& _lfo, Color _llColor) 
+  LeafLooper(CombinedLeafOscillator& _lfo, Color _llColor) 
   : stft(
     FFT_SIZE, FFT_SIZE/4,  // Window size, hop size
     0, gam::HANN, gam::COMPLEX 
   ), lfo(_lfo), llColor(_llColor)
   {
-    for(int i = 0; i < FFT_SIZE / 2; i++) {
-        float freq = float(i) / FFT_SIZE * SAMPLE_RATE;
-        binRadii.push_back((log(freq) - log(20)) / (log(centerFrequency) - log(20)) * centerRadius);  
-    }
     fftMagnitudes.resize(FFT_SIZE/2);
 
     trail.primitive(Graphics::TRIANGLE_STRIP);
@@ -62,6 +58,15 @@ struct LeafLooper : SoundSource {
     directionCone.generateNormals();
 
     setTrailLengthInSeconds(15);
+    setBinRadii(1);
+  }
+
+  void setBinRadii(float centerRadius, float centerFrequency=4000) {
+    binRadii.clear();
+    for(int i = 0; i < FFT_SIZE / 2; i++) {
+      float freq = float(i) / FFT_SIZE * SAMPLE_RATE;
+      binRadii.push_back((log(freq) - log(20)) / (log(centerFrequency) - log(20)) * centerRadius);  
+    }
   }
 
   void setTrailLengthInSeconds(float seconds) {

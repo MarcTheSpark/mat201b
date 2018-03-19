@@ -36,7 +36,8 @@ using namespace gam;
 // Notes to self:
 
 // TODO: Clean up the trashfire that is setLLPositions
-// TODO: Controls over color, size, leafShape, min distance, background color in the simulator
+// TODO: Make marker positions for other levels of structure
+// TODO: Controls over leafShape, leafMotionShape, min distance
 
 
 // Will animate: leaf size, leaf orientation (where the top is pointing), color based on structural parameters
@@ -53,6 +54,55 @@ CombinedLeafOscillator ll1VerticalMotionComboOscillator(ivyOscillator, birchOsci
 CombinedLeafOscillator ll2VerticalMotionComboOscillator(ivyOscillator, birchOscillator);
 
 
+struct LeafLoopsWidgets {
+  GLVBinding gui;
+  glv::Slider looperRadii, ll1LeafType, ll2LeafType;
+  glv::ColorPicker bgColorPicker, ll1ColorPicker, ll2ColorPicker;
+  // glv::Slider2D slider2d;
+  glv::Table layout;
+
+  LeafLoopsWidgets() {
+    // Configure GUI
+    gui.style().color.set(glv::Color(0.7), 0.5);
+
+    layout.arrangement(">p");
+
+    looperRadii.setValue(0.4);
+    layout << looperRadii;
+    layout << new glv::Label("Looper Radii");
+
+    bgColorPicker.setValue(glv::Color(0.05625, 0.06, 0.0625));
+    layout << bgColorPicker;
+    layout << new glv::Label("BG Color");
+
+    ll1ColorPicker.setValue(glv::Color(0.108333, 0.541667, 0));
+    layout << ll1ColorPicker;
+    layout << new glv::Label("LL1 Color");
+
+    ll2ColorPicker.setValue(glv::Color(0.422813, 0.6875, 0.309375));
+    layout << ll2ColorPicker;
+    layout << new glv::Label("LL2 Color");
+
+    ll1LeafType.setValue(0.5);
+    layout << ll1LeafType;
+    layout << new glv::Label("LL1 Leaf Type");
+
+    ll2LeafType.setValue(0.5);
+    layout << ll2LeafType;
+    layout << new glv::Label("LL2 Leaf Type");
+    // slider2d.interval(-1,1);
+    // layout << slider2d;
+    // layout << new glv::Label("position");
+
+    layout.arrange();
+
+    gui << layout;
+  } 
+
+  float getLooperRadii() {
+    return looperRadii.getValue()*4;
+  }
+};
 
 struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient {
 
@@ -75,6 +125,8 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
   float ll2HorizontalMotionPhase = 0, ll2VerticalMotionPhase = 0;
   float ll2HorizontalMotionFreq = 0.08, ll2VerticalMotionFreq = 0.05;
   float ll2HMotionRadiusMul = 8.0, ll2VMotionRadiusMul = 7.0;
+
+  LeafLoopsWidgets glvWidgets;
 
   LeafLoops() 
     : maker(Simulator::defaultBroadcastIP()),
@@ -109,6 +161,9 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
     ll2.dopplerType(DOPPLER_NONE);
     scene()->usePerSampleProcessing(true);
     // scene()->usePerSampleProcessing(false);
+
+    // Connect GUI to window
+    glvWidgets.gui.bindTo(window());
   }
 
   void initializeMotionVariables() {
@@ -134,6 +189,18 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
       setLLPositions(dt);
       sendDataToCuttlebone();
     }
+
+    checkGLVWidgets();
+  }
+
+  void checkGLVWidgets() {
+    background(HSV(glvWidgets.bgColorPicker.getValue().components));
+    ll1.llColor = HSV(glvWidgets.ll1ColorPicker.getValue().components);
+    ll2.llColor = HSV(glvWidgets.ll2ColorPicker.getValue().components);
+    ll1.setBinRadii(glvWidgets.getLooperRadii());
+    ll2.setBinRadii(glvWidgets.getLooperRadii());
+    ll1.lfo.setWeighting(glvWidgets.ll1LeafType.getValue());
+    ll2.lfo.setWeighting(glvWidgets.ll2LeafType.getValue());
   }
 
   void setLLPositions(double dt) {
@@ -270,6 +337,18 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
       case '0':
         ll1.doTrail = !ll1.doTrail;
         ll2.doTrail = !ll2.doTrail;
+        break;
+      case 'p':
+        // print all the glv settings to keep track of
+        Color c = HSV(glvWidgets.bgColorPicker.getValue().components);
+        cout << "BGColor: Color(" << c.r << ", " << c.g << ", " << c.b << ")" << endl;
+        c = HSV(glvWidgets.ll1ColorPicker.getValue().components);
+        cout << "LL1Color: Color(" << c.r << ", " << c.g << ", " << c.b << ")" << endl;
+        c = HSV(glvWidgets.ll2ColorPicker.getValue().components);
+        cout << "LL2Color: Color(" << c.r << ", " << c.g << ", " << c.b << ")" << endl;
+        cout << "Looper Radii: " << glvWidgets.getLooperRadii() << endl;
+        cout << "LL1 Leaf Type: " << glvWidgets.ll1LeafType.getValue() << endl;
+        cout << "LL2 Leaf Type: " << glvWidgets.ll2LeafType.getValue() << endl;
         break;
     }
   }
