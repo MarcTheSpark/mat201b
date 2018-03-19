@@ -33,6 +33,8 @@ struct LeafLooper : SoundSource {
   float centerFrequency = 4000;
   float centerRadius = 1;
 
+  float amplitudeExpansion = 0.5;
+
   CombinedLeafOscillator& lfo;
   vector<float> binRadii;
   vector<float> fftMagnitudes;
@@ -112,11 +114,12 @@ struct LeafLooper : SoundSource {
 
     for(int i = 0; i < FFT_SIZE / 2; i++) {
       float radius = binRadii.at(i) * lfo.getRadius(phase);
-      float angle = lfo.getAngle(phase);
-      // loud bins get visualized with random displacement of the second angle
-      float adjustedPhase2 = phase2 + rnd::uniformS() * 0.5 * fftMagnitudes.at(i); // 0.5*M_PI; 
+      float angle = lfo.getAngle(phase) + rnd::uniformS() * amplitudeExpansion * fftMagnitudes.at(i);
+      float angle2 = lfo.getAngle(phase2) + rnd::uniformS() * amplitudeExpansion * fftMagnitudes.at(i);
+      // // loud bins get visualized with random displacement of the second angle
+      // float adjustedAngle2 = angle2 + rnd::uniformS() * amplitudeExpansion * fftMagnitudes.at(i); // 0.5*M_PI; 
       // add randomness to phase 2, and clip it
-      newRadialStripVertices.append(Vec3f(-radius*cos(angle)*sin(adjustedPhase2), radius*sin(angle), radius*cos(adjustedPhase2)));
+      newRadialStripVertices.append(Vec3f(cos(angle2)*radius, cos(angle)*sin(angle2)*radius, -sin(angle)*radius));
       newRadialStripColors.append(Color(llColor.r, llColor.g, llColor.b, fftMagnitudes.at(i)));
     }
     radialStripVertices.push_back(newRadialStripVertices);

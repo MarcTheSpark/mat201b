@@ -58,6 +58,8 @@ struct State {
   Pose navPose;
   Color bgColor;
   LeafLooperData llDatas[NUM_LEAF_LOOPERS];
+
+  State() : bgColor(0, 0, 0) {}
 };
 
 #endif
