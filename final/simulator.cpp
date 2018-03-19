@@ -120,13 +120,13 @@ struct LeafLoopsWidgets {
 
 struct LLMotion
 {
-  float horizontalRadiusMul = 8.0, verticalRadiusMul = 7.0;
+  float horizontalRadiusMul, verticalRadiusMul;
   MeterMaid horizonalDownbeatPhasor, verticalDownbeatPhasor;
   CombinedLeafOscillator horizonalLeafOscillator, verticalLeafOscillator;
 
-  LLMotion(string horizonalDownbeatsFile, string verticalDownbeatsFile, float _horizontalRadiusMul, float _verticalRadiusMul)
-   : horizonalDownbeatPhasor(horizonalDownbeatsFile), 
-   verticalDownbeatPhasor(verticalDownbeatsFile),
+  LLMotion(MeterMaid& _horizonalDownbeatsPhasor, MeterMaid& _verticalDownbeatsPhasor, float _horizontalRadiusMul, float _verticalRadiusMul)
+   : horizonalDownbeatPhasor(_horizonalDownbeatsPhasor), 
+   verticalDownbeatPhasor(_verticalDownbeatsPhasor),
    horizontalRadiusMul(_horizontalRadiusMul),
    verticalRadiusMul(_verticalRadiusMul),
    horizonalLeafOscillator(ivyOscillator, birchOscillator),
@@ -141,8 +141,9 @@ struct LLMotion
     float hRadius = horizonalLeafOscillator.getRadius(horizonalDownbeatPhasor.getPhasePosition(t));
     float vAngle = verticalLeafOscillator.getAngle(verticalDownbeatPhasor.getPhasePosition(t));
     float vRadius = verticalLeafOscillator.getRadius(verticalDownbeatPhasor.getPhasePosition(t));
-    float goalX = cos(hAngle) * hRadius * horizontalRadiusMul;
-    float goalY = sin(vAngle) * vRadius * verticalRadiusMul;
+
+    float goalX = cos(hAngle) * hRadius * horizontalRadiusMul * (0.9 + pow(sin(horizonalDownbeatPhasor.getPhasePosition(t)*M_PI), 2));
+    float goalY = sin(vAngle) * vRadius * verticalRadiusMul * (0.9 + pow(sin(verticalDownbeatPhasor.getPhasePosition(t)*M_PI), 2));
     float goalZ = -sin(hAngle) * cos(vAngle) * vRadius * hRadius * verticalRadiusMul;
     float horizontalDist = hypot(goalX, goalZ);
     if(horizontalDist < MIN_DIST) { // ensure it doesn't get too close
@@ -162,11 +163,12 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
   bool paused = false, doOneFrame = false;
   LeafLooper ll1, ll2;
 
-  MeterMaid beatCycleLookup, hyperbeatCycleLookup;
+  MeterMaid beatCycleLookup, hyperbeatCycleLookup, smallSectionCycleLookup, bigSectionCycleLookup;
 
-  LLMotion ll1Motion, ll2Motion;
+  LLMotion llMotion;
 
   bool firstDrawDone = false;
+  bool turning = true;
 
   LeafLoopsWidgets glvWidgets;
 
@@ -177,14 +179,15 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
       ll2(ll2ComboOscillator, Color(0.0, 0.3, 0.8)),
       beatCycleLookup("LeafLoopsDownbeats.txt"),
       hyperbeatCycleLookup("LeafLoopsHyperDownbeats.txt"),
-      ll1Motion("LeafLoopsSectionDownbeats.txt", "LeafLoopsBigSectionDownbeats.txt", 8.0, 7.0),
-      ll2Motion("LeafLoopsBigSectionDownbeats.txt", "LeafLoopsSectionDownbeats.txt", -8.0, 7.0) 
+      smallSectionCycleLookup("LeafLoopsSectionDownbeats.txt"),
+      bigSectionCycleLookup("LeafLoopsBigSectionDownbeats.txt"),
+      llMotion(smallSectionCycleLookup, bigSectionCycleLookup, 6.0, 4.5)
     {
     anaylsisPlayer.load(fullPathOrDie(ANALYSIS_SOUND_FILE_NAME).c_str());
     anaylsisPlayer.pos(FFT_SIZE); // give the analysisPlayer a headstart of FFT_SIZE, to compensate for the lag in analysis
     playbackPlayer.load(fullPathOrDie(PLAYBACK_SOUND_FILE_NAME).c_str());
     initWindow(Window::Dim(900, 600), "Leaf Loops");
-    nav().pos(0, -0.5, 0);
+    nav().pos(0, -3.5, 0);
     nav().faceToward(Vec3d(0, -0.5, -1), Vec3d(0, 1, 0));
     ll1.p.pos(0, 0, -3);
     ll1.p.faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
@@ -222,10 +225,19 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
       ll2.pushNewStrip(measurePhase, hypermeasurePhase);
 
       setLLPositions();
+      animateParamsToStructure();
       sendDataToCuttlebone();
     }
 
     checkGLVWidgets();
+  }
+
+  void animateParamsToStructure() {
+    float smallDownbeatiness = pow(sin(smallSectionCycleLookup.getPhasePosition(getTime())*M_PI), 0.5);
+    float bigDownbeatiness = pow(sin(bigSectionCycleLookup.getPhasePosition(getTime())*M_PI), 0.5);
+    llMotion.horizontalRadiusMul = 6.0 * (0.9 + smallDownbeatiness);
+    llMotion.verticalRadiusMul = 4.5 * (0.9 + bigDownbeatiness);
+    glvWidgets.amplitudeExpansion.setValue(0.22 + 0.2 * (1-smallDownbeatiness) + 0.2 * (1-bigDownbeatiness));
   }
 
   void checkGLVWidgets() {
@@ -242,14 +254,17 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
   }
 
   void setLLPositions() {
+    Vec3f ll1Position = llMotion.getPosition(getTime());
     Pose newGoal;
-    newGoal.pos(ll1Motion.getPosition(getTime()));
+    newGoal.pos(ll1Position);
     newGoal.faceToward(Vec3d(0, 0, 0));
     ll1.p = ll1.p.lerp(newGoal, 0.01);
 
-    newGoal.pos(ll2Motion.getPosition(getTime()));
+    newGoal.pos(-ll1Position);
     newGoal.faceToward(Vec3d(0, 0, 0));
     ll2.p = ll2.p.lerp(newGoal, 0.01);
+
+    if (turning) { nav().turnU(0.001); }
   }
 
   float getTime() {
@@ -337,12 +352,15 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
         nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 0, -1));
         break;
       case '=':
-        nav().pos(0, -0.5, 0);
+        nav().pos(0, -3.5, 0);
         nav().faceToward(Vec3d(0, 0, -1), Vec3d(0, 1, 0));
         break;
       case '0':
         ll1.doTrail = !ll1.doTrail;
         ll2.doTrail = !ll2.doTrail;
+        break;
+      case 't':
+        turning = !turning;
         break;
       case 'p':
         // print all the glv settings to keep track of
@@ -358,6 +376,7 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
         cout << "Amplitude Expansion: " << glvWidgets.getAmplitudeExpansion() << endl;
         cout << "Position: " << nav().pos() << endl;
         break;
+
     }
   }
 };
