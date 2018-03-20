@@ -22,7 +22,7 @@ struct LeafLooper : SoundSource {
   Mesh trail;
   deque<Vec3f> trailVertices;
   deque<Color> trailColors;
-  unsigned maxTrailLength = 0;
+  int maxTrailLength = 0;
   float trailAlphaDecayFactor = 0.99;
   bool doTrail = true;
 

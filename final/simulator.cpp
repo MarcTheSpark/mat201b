@@ -9,7 +9,7 @@
 #define FFT_SIZE (1024)
 #define REDUNDANCY (5)
 #define VISUAL_DECAY (0.8)
-#define MIN_DIST (3)
+#define MIN_DIST (5)
 
 #include <cassert>
 #include <iostream>
@@ -21,6 +21,7 @@
 #include "leafOscillators.hpp"
 #include "leafLooper.hpp"
 #include "meterMaid.hpp"
+#include "score.hpp"
 #include "alloutil/al_AlloSphereAudioSpatializer.hpp"
 #include "alloutil/al_Simulator.hpp"
 using namespace al;
@@ -34,10 +35,8 @@ using namespace gam;
 
 
 // Notes to self:
-
-// TODO: Clean up the trashfire that is setLLPositions
-// TODO: Make marker positions for other levels of structure
-// TODO: Controls over leafShape, leafMotionShape, min distance
+// make colors change per section
+// y = -6 is a good place for the harmonics. Maybe they should be blue too.
 
 
 // Will animate: leaf size, leaf orientation (where the top is pointing), color based on structural parameters
@@ -112,12 +111,6 @@ struct LeafLoopsWidgets {
   }
 };
 
-// struct LeafLooperMotion {
-//   float horizontalMotionPhase = 0, ll1VerticalMotionPhase = 0;
-//   float ll1HorizontalMotionFreq = 0.08, ll1VerticalMotionFreq = 0.05;
-//   float ll1HMotionRadiusMul = 8.0, ll1VMotionRadiusMul = 7.0;
-// }
-
 struct LLMotion
 {
   float horizontalRadiusMul, verticalRadiusMul;
@@ -132,8 +125,8 @@ struct LLMotion
    horizonalLeafOscillator(ivyOscillator, birchOscillator),
    verticalLeafOscillator(ivyOscillator, birchOscillator)
   {
-    horizonalLeafOscillator.setWeighting(0.4);
-    verticalLeafOscillator.setWeighting(0.4);
+    horizonalLeafOscillator.setWeighting(0.7);
+    verticalLeafOscillator.setWeighting(0.0);
   }
 
   Vec3f getPosition(float t) {
@@ -164,31 +157,35 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
   LeafLooper ll1, ll2;
 
   MeterMaid beatCycleLookup, hyperbeatCycleLookup, smallSectionCycleLookup, bigSectionCycleLookup;
+  Score score;
 
   LLMotion llMotion;
 
   bool firstDrawDone = false;
   bool turning = true;
+  float turnSpeed = 0.001;
 
   LeafLoopsWidgets glvWidgets;
 
   LeafLoops() 
     : maker(Simulator::defaultBroadcastIP()),
       InterfaceServerClient(Simulator::defaultInterfaceServerIP()),
-      ll1(ll1ComboOscillator, Color(0.8, 0.8, 0.0)), 
-      ll2(ll2ComboOscillator, Color(0.0, 0.3, 0.8)),
+      ll1(ll1ComboOscillator, Color(0.9375, 0.9375, 0.3125)), 
+      ll2(ll2ComboOscillator, Color(0.39375, 0.875, 0.538125)),
       beatCycleLookup("LeafLoopsDownbeats.txt"),
       hyperbeatCycleLookup("LeafLoopsHyperDownbeats.txt"),
       smallSectionCycleLookup("LeafLoopsSectionDownbeats.txt"),
       bigSectionCycleLookup("LeafLoopsBigSectionDownbeats.txt"),
-      llMotion(smallSectionCycleLookup, bigSectionCycleLookup, 6.0, 4.5)
+      llMotion(smallSectionCycleLookup, bigSectionCycleLookup, 6.0, 4.5),
+      score(ll1, ll2, nav(), beatCycleLookup, hyperbeatCycleLookup, smallSectionCycleLookup, 
+        bigSectionCycleLookup, llMotion.horizontalRadiusMul, llMotion.verticalRadiusMul, turnSpeed) 
     {
     anaylsisPlayer.load(fullPathOrDie(ANALYSIS_SOUND_FILE_NAME).c_str());
     anaylsisPlayer.pos(FFT_SIZE); // give the analysisPlayer a headstart of FFT_SIZE, to compensate for the lag in analysis
     playbackPlayer.load(fullPathOrDie(PLAYBACK_SOUND_FILE_NAME).c_str());
     initWindow(Window::Dim(900, 600), "Leaf Loops");
-    nav().pos(0, -3.5, 0);
-    nav().faceToward(Vec3d(0, -0.5, -1), Vec3d(0, 1, 0));
+    nav().pos(0, -3.0, 0);
+    nav().faceToward(Vec3d(0, -3.0, -1), Vec3d(0, 1, 0));
     ll1.p.pos(0, 0, -3);
     ll1.p.faceToward(Vec3d(0, 0, 0), Vec3d(0, 1, 0));
     ll2.p.pos(0, 0, 3);
@@ -225,19 +222,11 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
       ll2.pushNewStrip(measurePhase, hypermeasurePhase);
 
       setLLPositions();
-      animateParamsToStructure();
+      score.setFromTime(getTime());
       sendDataToCuttlebone();
     }
 
-    checkGLVWidgets();
-  }
-
-  void animateParamsToStructure() {
-    float smallDownbeatiness = pow(sin(smallSectionCycleLookup.getPhasePosition(getTime())*M_PI), 0.5);
-    float bigDownbeatiness = pow(sin(bigSectionCycleLookup.getPhasePosition(getTime())*M_PI), 0.5);
-    llMotion.horizontalRadiusMul = 6.0 * (0.9 + smallDownbeatiness);
-    llMotion.verticalRadiusMul = 4.5 * (0.9 + bigDownbeatiness);
-    glvWidgets.amplitudeExpansion.setValue(0.22 + 0.2 * (1-smallDownbeatiness) + 0.2 * (1-bigDownbeatiness));
+    // checkGLVWidgets();
   }
 
   void checkGLVWidgets() {
@@ -264,7 +253,7 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
     newGoal.faceToward(Vec3d(0, 0, 0));
     ll2.p = ll2.p.lerp(newGoal, 0.01);
 
-    if (turning) { nav().turnU(0.001); }
+    if (turning) { nav().turnU(turnSpeed); }
   }
 
   float getTime() {
@@ -352,8 +341,8 @@ struct LeafLoops : public App, AlloSphereAudioSpatializer, InterfaceServerClient
         nav().faceToward(Vec3d(0, 0, 0), Vec3d(0, 0, -1));
         break;
       case '=':
-        nav().pos(0, -3.5, 0);
-        nav().faceToward(Vec3d(0, 0, -1), Vec3d(0, 1, 0));
+        nav().pos(0, -3.0, 0);
+        nav().faceToward(Vec3d(0, -3.0, -1), Vec3d(0, 1, 0));
         break;
       case '0':
         ll1.doTrail = !ll1.doTrail;
